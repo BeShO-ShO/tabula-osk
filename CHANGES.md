@@ -5,16 +5,6 @@
   disabled, and any key still held is released. Needed for extensions.gnome.org review.
 - Release workflow updated to the Node 24 versions of its GitHub Actions.
 
-## Rename (2026-11-02)
-The extension was renamed from its old name to Apropos OSK:
-- UUID `apropos-osk@besho-sho`, schema `org.gnome.shell.extensions.apropos-osk`
-  (path `/org/gnome/shell/extensions/apropos-osk/`)
-- config folder `~/.config/apropos-osk/` (custom layout, learned words)
-- log prefix `[AproposOSK]`, CSS classes `apropos-osk-*`, panel/Quick Settings name "Apropos Keyboard"
-- backups in `~/apropos-osk-backup/`
-
-Settings were copied over from the old schema path.
-
 ## Typing Booster suggestions (2026-11-02)
 New setting `use-typing-booster` (default off), switch "Use Typing Booster for
 suggestions" in Settings, under "Word suggestions" (needs word suggestions on).
