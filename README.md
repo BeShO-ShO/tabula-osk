@@ -15,6 +15,14 @@ and lets you move the cursor or select text by dragging on the keys.
 
 Author: [BeShO-ShO](https://github.com/BeShO-ShO). Based on [**Fluent OSK**](https://github.com/TbangIT/fluent-osk) (`fluent-osk@tbang`) by [**TbangIT**](https://github.com/TbangIT). See [Credits](#credits).
 
+## Screenshots
+
+The docked keyboard with word suggestions:
+![Apropos OSK docked at the bottom of the screen, with word suggestions above the keys](screenshots/keyboard.png)
+
+The settings window:
+![Apropos OSK settings window](screenshots/settings.png)
+
 ## Demo
 
 Move the cursor by dragging on the space bar:
