@@ -1,0 +1,10 @@
+# build output
+dist/
+*.shell-extension.zip
+# generated at install time
+schemas/gschemas.compiled
+# runtime leftovers / editor backups
+keyboard_rt_*.js
+*.bak
+*.pre-*
+*~
