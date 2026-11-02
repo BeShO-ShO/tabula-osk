@@ -3,6 +3,12 @@
 ![GNOME Shell](https://img.shields.io/badge/GNOME_Shell-50-blue)
 ![License](https://img.shields.io/badge/License-GPLv3-green)
 
+*The opportune on-screen keyboard for GNOME. Built to be the absolute right fit for touch devices.*
+
+## The Problem
+If you have ever used a modern Linux touch device running GNOME, you know the frustration: there is a severe lack of on-screen keyboard (OSK) extensions that work reliably, fluidly, and intuitively with touch gestures. The default options often feel clunky, sluggish, or poorly integrated into a modern mobile-first workflow.
+
+## The Solution
 Apropos OSK is an on-screen keyboard for GNOME Shell, made for touchscreen laptops and tablets and inspired by the Windows 11 touch keyboard.
 It replaces the stock GNOME keyboard. It has a full TKL layout with real modifier keys, opens by itself when you tap a text field, suggests words,
 and lets you move the cursor or select text by dragging on the keys.
