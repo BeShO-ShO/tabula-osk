@@ -11,13 +11,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install gnome-extensions tool
         run: sudo apt-get update && sudo apt-get install -y gnome-shell-common gnome-shell libglib2.0-bin
       - name: Pack extension
         run: ./pack.sh
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*.shell-extension.zip
           generate_release_notes: true
