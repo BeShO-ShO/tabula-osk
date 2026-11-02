@@ -1571,11 +1571,10 @@ export class AproposKeyboard {
         // Smart auto-closing
         if (isAutoPairs && openingPairs[typedLabel]) {
             const closer = openingPairs[typedLabel];
-            GLib.timeout_add(GLib.PRIORITY_HIGH, 16, () => {
+            this._oneShot(16, () => {
                 this._typeCharacterByMatchingKey(closer);
                 this._input.tapKey(105); // Move cursor inside
                 this._smartPairStack.push(closer);
-                return GLib.SOURCE_REMOVE;
             });
         }
 
@@ -2720,13 +2719,12 @@ export class AproposKeyboard {
             if (s.shift)
                 this._input.pressKey(42);
             this._input.pressKey(s.code);
-            GLib.timeout_add(GLib.PRIORITY_HIGH, 8, () => {
+            this._oneShot(8, () => {
                 if (this._input) {
                     this._input.releaseKey(s.code);
                     if (s.shift)
                         this._input.releaseKey(42);
                 }
-                return GLib.SOURCE_REMOVE;
             });
             return GLib.SOURCE_CONTINUE;
         });
@@ -2980,8 +2978,22 @@ export class AproposKeyboard {
         }
     }
 
+    // Short high-priority timer that is cancelled in destroy().
+    _oneShot(ms, fn) {
+        this._oneShotIds ??= new Set();
+        const id = GLib.timeout_add(GLib.PRIORITY_HIGH, ms, () => {
+            this._oneShotIds.delete(id);
+            fn();
+            return GLib.SOURCE_REMOVE;
+        });
+        this._oneShotIds.add(id);
+    }
+
     destroy() {
         this._destroyed = true;
+        for (const id of this._oneShotIds ?? [])
+            GLib.source_remove(id);
+        this._oneShotIds?.clear();
         this._tsDestroy();
         this._cleanupStageGesture();
         this._stopKeyRepeat();

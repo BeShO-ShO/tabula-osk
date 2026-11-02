@@ -5,6 +5,7 @@ export class VirtualInput {
     constructor() {
         this._device = null;
         this._activeKeys = new Set();
+        this._tapIds = new Set();
         try {
             const backend = Clutter.get_default_backend();
             if (backend) {
@@ -60,12 +61,16 @@ export class VirtualInput {
         const time = this._getTime();
         try {
             this._notify(time, code, Clutter.KeyState.PRESSED);
-            GLib.timeout_add(GLib.PRIORITY_HIGH, 8, () => {
+            this._activeKeys.add(code);
+            const id = GLib.timeout_add(GLib.PRIORITY_HIGH, 8, () => {
+                this._tapIds.delete(id);
                 if (this._device) {
                     this._notify(this._getTime(), code, Clutter.KeyState.RELEASED);
+                    this._activeKeys.delete(code);
                 }
                 return GLib.SOURCE_REMOVE;
             });
+            this._tapIds.add(id);
         } catch (e) {
             console.error(`[AproposOSK] Failed to tap key ${code}:`, e);
         }
@@ -83,6 +88,9 @@ export class VirtualInput {
     }
 
     destroy() {
+        for (const id of this._tapIds)
+            GLib.source_remove(id);
+        this._tapIds.clear();
         this.releaseAll();
         this._device = null;
     }
