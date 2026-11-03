@@ -33,16 +33,28 @@ Select and delete text by dragging on Backspace:
 
 ## Installation
 
-**From GNOME Extensions** (recommended): install *Apropos OSK* from [extensions.gnome.org](https://extensions.gnome.org) or the Extension Manager app.
+Apropos OSK is not on extensions.gnome.org; it is installed from the GitHub releases.
 
-**From a GitHub release:** download `apropos-osk@besho-sho.shell-extension.zip` from the [Releases](https://github.com/BeShO-ShO/apropos-osk/releases) page, then run:
+**From a GitHub release** (recommended): download and install the latest release:
 ```bash
+curl -LO https://github.com/BeShO-ShO/apropos-osk/releases/latest/download/apropos-osk@besho-sho.shell-extension.zip
 gnome-extensions install --force apropos-osk@besho-sho.shell-extension.zip
 ```
+(or download the zip by hand from the [Releases](https://github.com/BeShO-ShO/apropos-osk/releases) page).
 Log out and back in (needed on Wayland), then enable it:
 ```bash
 gnome-extensions enable apropos-osk@besho-sho
 ```
+Settings: `gnome-extensions prefs apropos-osk@besho-sho`, or the Extensions app.
+
+**Updating:** run the same two commands again with the new release, then log out and back in. Your settings and
+learned words are kept.
+
+**Uninstalling:**
+```bash
+gnome-extensions uninstall apropos-osk@besho-sho
+```
+Learned words and a custom layout stay in `~/.config/apropos-osk/`; delete that folder to remove them too.
 
 **From source:**
 ```bash
