@@ -184,27 +184,37 @@ export default class AproposOskPreferences extends ExtensionPreferences {
             title: _('Active typing layout'),
             subtitle: _('Select the preset or custom layout'),
             model: new Gtk.StringList({
-                strings: ['Italian (Compact TKL)', 'English (US TKL)', 'Custom Layout']
+                strings: ['Italian (Compact TKL)', 'English (US TKL)', 'Tablet (US, Gboard style)', 'Custom Layout']
             }),
         });
-        const currentLayout = settings.get_string('layout-variant');
-        if (currentLayout === 'custom') {
-            layoutRow.selected = 2;
-        } else if (currentLayout === 'us') {
-            layoutRow.selected = 1;
-        } else {
-            layoutRow.selected = 0;
-        }
+        const layoutKeys = ['it', 'us', 'phone', 'custom'];
+        const syncLayoutRow = () => {
+            const idx = layoutKeys.indexOf(settings.get_string('layout-variant'));
+            const want = idx >= 0 ? idx : 0;
+            if (layoutRow.selected !== want)
+                layoutRow.selected = want;
+        };
+        syncLayoutRow();
         layoutRow.connect('notify::selected', () => {
-            if (layoutRow.selected === 2) {
-                settings.set_string('layout-variant', 'custom');
-            } else if (layoutRow.selected === 1) {
-                settings.set_string('layout-variant', 'us');
-            } else {
-                settings.set_string('layout-variant', 'it');
-            }
+            const key = layoutKeys[layoutRow.selected] || 'it';
+            if (settings.get_string('layout-variant') !== key)
+                settings.set_string('layout-variant', key);
         });
+        settings.connect('changed::layout-variant', syncLayoutRow);
         dimGroup.add(layoutRow);
+
+        // Key style
+        const themeRow = new Adw.ComboRow({
+            title: _('Key style'),
+            subtitle: _('Fluent: the Windows 11 look. Material: a flat phone look that follows the system light or dark style'),
+            model: new Gtk.StringList({ strings: [_('Fluent'), _('Material')] }),
+        });
+        const themeKeys = ['fluent', 'material'];
+        themeRow.selected = Math.max(0, themeKeys.indexOf(settings.get_string('theme')));
+        themeRow.connect('notify::selected', () => {
+            settings.set_string('theme', themeKeys[themeRow.selected] || 'fluent');
+        });
+        dimGroup.add(themeRow);
 
         // Width Percent
         const widthRow = new Adw.SpinRow({
@@ -541,7 +551,7 @@ export default class AproposOskPreferences extends ExtensionPreferences {
         // Group: Digitazione Intelligente
         const smartGroup = new Adw.PreferencesGroup({
             title: _('Smart Typing'),
-            description: _('Advanced assistance for brackets, quotes and paired symbols'),
+            description: _('Brackets and quotes, accents, capitals, periods and spelling'),
         });
         page2.add(smartGroup);
 
@@ -551,6 +561,47 @@ export default class AproposOskPreferences extends ExtensionPreferences {
         });
         settings.bind('smart-auto-pairs', autoPairsRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         smartGroup.add(autoPairsRow);
+
+        const longPressRow = new Adw.SwitchRow({
+            title: _('Hold keys for accents and symbols'),
+            subtitle: _('On the Tablet layout, holding a key opens a row of accented letters and symbols; slide to one and let go. The symbol in the corner of each key comes first'),
+        });
+        settings.bind('long-press', longPressRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        smartGroup.add(longPressRow);
+
+        const longPressDelayRow = new Adw.SpinRow({
+            title: _('Hold time (ms)'),
+            subtitle: _('How long to hold a key before the accents and symbols appear'),
+            adjustment: new Gtk.Adjustment({
+                lower: 150,
+                upper: 900,
+                step_increment: 25,
+            }),
+        });
+        bindIntToSpinRow(settings, 'long-press-delay', longPressDelayRow);
+        settings.bind('long-press', longPressDelayRow, 'sensitive', Gio.SettingsBindFlags.GET);
+        smartGroup.add(longPressDelayRow);
+
+        const autoCapRow = new Adw.SwitchRow({
+            title: _('Auto-capitalization'),
+            subtitle: _('Shift turns on by itself at the start of a sentence and of an empty field. It only affects letters. Tap Shift to type a small letter instead'),
+        });
+        settings.bind('auto-capitalize', autoCapRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        smartGroup.add(autoCapRow);
+
+        const doubleSpaceRow = new Adw.SwitchRow({
+            title: _('Double-space for a period'),
+            subtitle: _('Tapping space twice after a word types a period and a space'),
+        });
+        settings.bind('double-space-period', doubleSpaceRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        smartGroup.add(doubleSpaceRow);
+
+        const autocorrectRow = new Adw.SwitchRow({
+            title: _('Autocorrect (English)'),
+            subtitle: _('Fixes misspelled words when you type a space or punctuation, using the system spell checker (Enchant/Hunspell). Press Backspace right after a correction to undo it; that word is then left alone. Never used in password, terminal, URL or e-mail fields'),
+        });
+        settings.bind('autocorrect', autocorrectRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        smartGroup.add(autocorrectRow);
 
         // ==========================================
         // Page 3: Studio Customizzazione Layout Completa
@@ -678,7 +729,7 @@ export default class AproposOskPreferences extends ExtensionPreferences {
             settings.set_int('custom-layout-token', token);
 
             if (layoutSelectorRow) {
-                layoutSelectorRow.selected = 2;
+                layoutSelectorRow.selected = 3;   // Custom Layout
             }
             if (window.add_toast) {
                 window.add_toast(new Adw.Toast({

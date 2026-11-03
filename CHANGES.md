@@ -1,5 +1,41 @@
 # Changes
 
+## 1.1.0 (2026-11-03)
+- New layout **Tablet (US, Gboard style)** (setting value `phone`): number row; tablet arrangement with Backspace at the end of
+  the q row and a wide Enter at the end of the home row (a row apart), Shift on both sides with `,` `.` beside `m`,
+  and Ctrl, Super, Space, ▲, ▼ at the bottom. Half-key indent on the home row (new `spacer` key type).
+- **Long-press** on the Tablet layout: corner symbol + accents from GNOME's own OSK data
+  (`/usr/share/gnome-shell/gnome-shell-osk-layouts.gresource`, read at runtime). Characters without a key are typed like the
+  stock keyboard does: through Typing Booster when it is active, as an input-method commit in text fields, or as keyvals.
+  A second touch while a key waits for long-press turns it into a normal tap (fast two-thumb typing).
+  Double-tap Shift = Caps Lock on the Tablet layout. Settings `long-press`, `long-press-delay`.
+- **Material theme** (`theme` = `fluent` | `material`), follows `org.gnome.desktop.interface color-scheme`.
+- **Auto-capitalization** (`auto-capitalize`): Shift latches by itself at sentence start / empty field and only shifts
+  letters. Uses the text the keyboard typed, else the app's surrounding text.
+- **Double-space period** (`double-space-period`).
+- **Autocorrect** (`autocorrect`, English; stays off when the system language is not English): `enchant-2 -a` pipe (spell.js) decides, `words-freq-en.txt` ranks
+  (textlogic.js), candidates are re-checked with Enchant. Replacement uses delete-surrounding + commit after verifying the
+  app's text, else Backspace + retype when the word start is known. Backspace right after a correction reverts it and
+  remembers the word.
+- Activities search: the overview counts as a shell field even before its search entry has focus, so Typing Booster steps aside
+  and auto-capitalization stays off there (the first letter typed on the OSK was lost).
+- **Next-word prediction**: after a space (or at the start of a sentence) the suggestion bar offers the likely next word;
+  tapping one types it plus a space. Learns word pairs typed with the OSK (`~/.config/apropos-osk/learned-pairs.json`),
+  also reads the pairs Typing Booster has learned (its user.db, read-only), and starts from a bundled list of
+  common pairs for 1,500 words (`next-words-en.txt`, ~50 KB, built from Tatoeba sentences; nouns are offered after "the", "a", "my"...). Works with and without Typing Booster; never in password/terminal/URL fields or Shell entries.
+  Autocorrected words are learned as corrected; tapping a Typing Booster candidate no longer loses the typing context.
+- Built-in suggestions use the frequency list for less common words (instead of the alphabetical Hunspell list).
+- Tablet layout: separate ▲ / ▼ keys, Left/Right by sliding on the wide space bar; long-press ↵ for Tab / Esc (new `lpKeys`
+  key property); Shift shows Caps Lock (lit, ⇪) after a double tap. New `split: [code, code]` key property (one key, top
+  half / bottom half) for custom layouts.
+- Tablet layout: Super key (❖) next to Ctrl. Tap = Super (Activities; hold it while tapping a key for Super+key);
+  long-press = sticky Alt (key lights up and reads "Alt"; tap it to release). New `lpAlt: true` key property for custom layouts.
+- Tablet layout: long-press ▲ / ▼ for PgUp, ⇧PgUp / PgDn, ⇧PgDn (Shift+PgUp/PgDn scrolls terminal history, e.g. Ptyxis).
+  `lpKeys` entries accept `shift: true`.
+- Typing Booster: a slow first engine start (longer than the Shell's 4 s limit) no longer leaves words stuck in
+  preedit with an empty suggestion bar. Shell entries (app search, run dialog) use plain xkb so search filters on
+  every letter instead of only after Enter/Tab.
+
 ## 1.0.1 (2026-11-03)
 - Short key-release and auto-pair timers are now cancelled when the extension is
   disabled, and any key still held is released. Needed for extensions.gnome.org review.

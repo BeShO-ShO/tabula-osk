@@ -1,6 +1,6 @@
 {
   "name": "Apropos OSK",
-  "description": "On-screen keyboard for touch devices, inspired by Windows 11. It has a compact TKL layout with Fn, Ctrl, Alt, AltGr and Super keys. It opens by itself on text fields, can suggest words (built-in or from ibus-typing-booster), moves the cursor when you drag on Space, and has a visual layout editor. It also runs on the lock screen so you can type your password there.\n\nBased on Fluent OSK by TbangIT (https://github.com/TbangIT/fluent-osk).",
+  "description": "On-screen keyboard for touch devices, inspired by Windows 11, with an optional Gboard-style phone layout. It has a compact TKL layout with Fn, Ctrl, Alt, AltGr and Super keys, or a phone layout with a number row, long-press accents and symbols and a Material look. It opens by itself on text fields, can suggest words (built-in or from ibus-typing-booster), capitalizes sentences, types a period on double space, autocorrects English, moves the cursor when you drag on Space, and has a visual layout editor. It also runs on the lock screen so you can type your password there.\n\nBased on Fluent OSK by TbangIT (https://github.com/TbangIT/fluent-osk).",
   "url": "https://github.com/BeShO-ShO/apropos-osk",
   "uuid": "apropos-osk@besho-sho",
   "settings-schema": "org.gnome.shell.extensions.apropos-osk",
@@ -11,5 +11,5 @@
   "shell-version": [
     "50"
   ],
-  "version-name": "1.0.1"
+  "version-name": "1.1.0"
 }

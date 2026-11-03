@@ -259,3 +259,278 @@
 .panel-button.apropos-osk-btn-active StIcon {
     color: #60cdff;
 }
+
+/* ------------------------------------------------------------------
+ * Long-press: corner symbol and popup (all themes)
+ * ------------------------------------------------------------------ */
+.apropos-osk-hint {
+    color: rgba(255, 255, 255, 0.55);
+    font-weight: normal;
+}
+
+.apropos-osk-lp-popup {
+    background-color: #2d2d33;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 10px;
+    padding: 4px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+
+.apropos-osk-lp-cell {
+    border-radius: 7px;
+}
+
+.apropos-osk-lp-cell StLabel {
+    color: #ffffff;
+}
+
+.apropos-osk-lp-cell-selected {
+    background-color: #0a6fd0;
+}
+
+/* ------------------------------------------------------------------
+ * Material theme (phone look). Follows the system light/dark style:
+ * .apropos-osk-dark / .apropos-osk-light are set next to the theme class.
+ * Flat keys, no borders or shadows, accent-coloured Enter and Shift.
+ * ------------------------------------------------------------------ */
+.apropos-osk-theme-material.apropos-osk-container {
+    background-color: #1b1b1f;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.apropos-osk-theme-material.apropos-osk-floating {
+    border-radius: 16px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+.apropos-osk-theme-material .apropos-osk-key {
+    background-color: #46464f;
+    color: #e3e3e3;
+    border: none;
+    box-shadow: none;
+}
+
+.apropos-osk-theme-material .apropos-osk-key:hover {
+    background-color: #52525c;
+}
+
+.apropos-osk-theme-material .apropos-osk-key.pressed,
+.apropos-osk-theme-material .apropos-osk-key:active {
+    background-color: #6a6a75;
+    border: none;
+}
+
+.apropos-osk-theme-material .apropos-osk-key-fn,
+.apropos-osk-theme-material .apropos-osk-key-mod,
+.apropos-osk-theme-material .apropos-osk-arrow {
+    background-color: #33333a;
+    color: #e3e3e3;
+}
+
+.apropos-osk-theme-material .apropos-osk-key-active {
+    background-color: #a8c7fa !important;
+    color: #062e6f !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+.apropos-osk-theme-material .apropos-osk-key-mod-shift,
+.apropos-osk-theme-material .apropos-osk-key-mod-fn,
+.apropos-osk-theme-material .apropos-osk-key-mod-altgr,
+.apropos-osk-theme-material .apropos-osk-key-mod-both {
+    background-color: #55555f !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: #ffffff !important;
+}
+
+.apropos-osk-theme-material .apropos-osk-enter,
+.apropos-osk-theme-material .apropos-osk-enter-shift {
+    background-color: #a8c7fa !important;
+    color: #062e6f !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+.apropos-osk-theme-material .apropos-osk-enter.pressed {
+    background-color: #8ab4f8 !important;
+}
+
+.apropos-osk-theme-material .apropos-osk-space-sliding {
+    background-color: #52525c;
+    border: none;
+    color: #e3e3e3;
+    box-shadow: none;
+}
+
+.apropos-osk-theme-material .apropos-osk-backspace-sliding {
+    background-color: #8c1d18;
+    border: none;
+    color: #ffdad6;
+    box-shadow: none;
+}
+
+.apropos-osk-theme-material .apropos-osk-handle {
+    background-color: rgba(255, 255, 255, 0.35);
+}
+
+.apropos-osk-theme-material .apropos-osk-header-btn {
+    color: #c4c6d0;
+}
+
+.apropos-osk-theme-material .apropos-osk-header-btn.active {
+    background-color: rgba(168, 199, 250, 0.22);
+    color: #d3e3fd;
+    border: none;
+}
+
+.apropos-osk-theme-material .apropos-osk-iso-enter-label {
+    color: #062e6f;
+}
+
+.apropos-osk-theme-material .apropos-osk-hint {
+    color: rgba(227, 227, 227, 0.6);
+}
+
+.apropos-osk-lp-popup.apropos-osk-theme-material {
+    background-color: #33333a;
+    border: none;
+    border-radius: 12px;
+}
+
+.apropos-osk-lp-popup.apropos-osk-theme-material .apropos-osk-lp-cell StLabel {
+    color: #e3e3e3;
+}
+
+.apropos-osk-lp-popup.apropos-osk-theme-material .apropos-osk-lp-cell-selected {
+    background-color: #a8c7fa;
+}
+
+.apropos-osk-lp-popup.apropos-osk-theme-material .apropos-osk-lp-cell-selected StLabel {
+    color: #062e6f;
+}
+
+/* Material, light */
+.apropos-osk-theme-material.apropos-osk-light.apropos-osk-container {
+    background-color: #e9eef6;
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-key {
+    background-color: #ffffff;
+    color: #1f1f1f;
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-key:hover {
+    background-color: #f3f6fb;
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-key.pressed,
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-key:active {
+    background-color: #d3dbe5;
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-key-fn,
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-key-mod,
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-arrow {
+    background-color: #c9d2de;
+    color: #1f1f1f;
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-key-active {
+    background-color: #0b57d0 !important;
+    color: #ffffff !important;
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-key-mod-shift,
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-key-mod-fn,
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-key-mod-altgr,
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-key-mod-both {
+    background-color: #dde3ea !important;
+    color: #1f1f1f !important;
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-enter,
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-enter-shift {
+    background-color: #0b57d0 !important;
+    color: #ffffff !important;
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-enter.pressed {
+    background-color: #0842a0 !important;
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-space-sliding {
+    background-color: #d3dbe5;
+    color: #1f1f1f;
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-handle {
+    background-color: rgba(0, 0, 0, 0.3);
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-header-btn {
+    color: #44474e;
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-header-btn:hover {
+    background-color: rgba(0, 0, 0, 0.08);
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-header-btn.active {
+    background-color: rgba(11, 87, 208, 0.14);
+    color: #0b57d0;
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-iso-enter-label {
+    color: #ffffff;
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-hint {
+    color: rgba(31, 31, 31, 0.55);
+}
+
+.apropos-osk-lp-popup.apropos-osk-theme-material.apropos-osk-light {
+    background-color: #ffffff;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+}
+
+.apropos-osk-lp-popup.apropos-osk-theme-material.apropos-osk-light .apropos-osk-lp-cell StLabel {
+    color: #1f1f1f;
+}
+
+.apropos-osk-lp-popup.apropos-osk-theme-material.apropos-osk-light .apropos-osk-lp-cell-selected {
+    background-color: #0b57d0;
+}
+
+.apropos-osk-lp-popup.apropos-osk-theme-material.apropos-osk-light .apropos-osk-lp-cell-selected StLabel {
+    color: #ffffff;
+}
+
+/* Phone layout: Shift shown as Caps Lock (double-tap) */
+.apropos-osk-key-locked {
+    font-weight: bold;
+}
+
+/* Split key (▲ over ▼): outer button invisible, each half drawn as a small key */
+.apropos-osk-key.apropos-osk-split,
+.apropos-osk-key.apropos-osk-split:hover,
+.apropos-osk-key.apropos-osk-split:active {
+    background-color: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+}
+
+.apropos-osk-split-half.pressed {
+    background-color: rgba(255, 255, 255, 0.34);
+}
+
+.apropos-osk-theme-material .apropos-osk-split-half.pressed {
+    background-color: #6a6a75;
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-split-half.pressed {
+    background-color: #d3dbe5;
+}
