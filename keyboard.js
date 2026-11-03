@@ -7,6 +7,11 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as BoxPointer from 'resource:///org/gnome/shell/ui/boxpointer.js';
 import { getIBusManager } from 'resource:///org/gnome/shell/misc/ibusManager.js';
 import { Layouts, loadCustomLayout } from './layouts.js';
+import * as TL from './textlogic.js';
+import { SpellChecker } from './spell.js';
+
+// Characters after which a just-typed word is checked by autocorrect
+const AC_TERMINATORS = new Set([' ', '.', ',', '!', '?', ';', ':']);
 
 // ----------------------------------------------------------------------
 // ibus-typing-booster bridge (setting 'use-typing-booster').
@@ -88,9 +93,18 @@ class TypingBoosterBridge {
                 Main.inputMethod.update();
             } catch (e) {}
         } catch (e) {
-            this._active = false;
-            this._unhook();
-            throw e;
+            // typing-booster can take longer than the Shell's 4 s limit on its first
+            // start; the Shell has already switched to it and the engine still comes up,
+            // so keep going (otherwise words sit in preedit with no suggestion bar)
+            const timedOut = e instanceof GLib.Error &&
+                e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.TIMED_OUT);
+            if (!timedOut || !this._active) {
+                this._active = false;
+                this._unhook();
+                throw e;
+            }
+            this._weEnabled = true;
+            console.warn('[AproposOSK] typing-booster slow to start, continuing');
         }
         this._notify();
     }
@@ -324,6 +338,22 @@ export class AproposKeyboard {
         this._toggleKeyStates = new Map();
         this._settingsSignals = [];
 
+        // Typing assistance (long-press, auto-capitalization, double-space period, autocorrect)
+        this._keySeq = 0;            // bumped on every key press and cursor move
+        this._typed = null;          // text typed since the cursor was last moved (null = unknown)
+        this._autoShift = false;     // Shift was turned on by auto-capitalization
+        this._shiftSent = false;     // Shift is physically held for the current key
+        this._acSuppressSeq = -1;
+        this._lastSpaceUs = 0;
+        this._lastSpaceSeq = -1;
+        this._lastShiftTapUs = 0;
+        this._lp = null;             // long-press state
+        this._lastCorrection = null;
+        this._spell = null;
+        this._freq = null;
+        this._waiters = new Set();
+        this._accentCache = new Map();
+
         this._isDocked = this._settings.get_boolean('dock-bottom');
         this._dockFullStrip = this._settings.get_boolean('dock-full-strip');
         this._currentLayoutKey = this._settings.get_string('layout-variant') || 'it';
@@ -351,7 +381,15 @@ export class AproposKeyboard {
             if (this.isOpen && this.actor && this.actor.get_parent()) {
                 this.actor.get_parent().set_child_above_sibling(this.actor, null);
             }
+            // A different field: nothing is known about the text before the cursor
+            this._trkUnknown();
+            this._acUpdate();
         });
+
+        // Auto-capitalization follows the real text when the app reports it
+        this._surroundingId = Main.inputMethod.connect('surrounding-text-set', () => this._acUpdate());
+
+        this._applyTheme();
     }
 
     _buildUI() {
@@ -522,7 +560,8 @@ export class AproposKeyboard {
 
     _getLayoutLabelText() {
         if (this._currentLayoutKey === 'custom') return '[CUSTOM]';
-        return `[${this._currentLayoutKey.toUpperCase()}]`;
+        const shown = { phone: "tablet" }[this._currentLayoutKey] || this._currentLayoutKey;
+        return `[${shown.toUpperCase()}]`;
     }
 
     _getWidthLabel() {
@@ -645,6 +684,8 @@ export class AproposKeyboard {
         if (!layout) {
             layout = Layouts[this._currentLayoutKey] || Layouts.it;
         }
+        this._layout = layout;
+        this._hintActors = [];
 
         // Riga numerica (TKL) + righe principali
         const rowSpecs = [];
@@ -668,7 +709,12 @@ export class AproposKeyboard {
                 const isIsoPart = iso && (
                     (iso.top.r === r && iso.top.i === k) ||
                     (iso.bottom.r === r && iso.bottom.i === k));
-                if (isIsoPart) {
+                if (keyDef.type === 'spacer') {
+                    // Empty gap (e.g. the half-key indent of a phone layout's middle row)
+                    btn = new St.Widget({ reactive: false });
+                    btn._keyDef = keyDef;
+                    btn._isSpacer = true;
+                } else if (isIsoPart) {
                     // Segnaposto spaziatore riga
                     btn = new St.Widget({
                         reactive: false,
@@ -678,6 +724,7 @@ export class AproposKeyboard {
                     btn._isEnterPlaceholder = true;
                 } else {
                     btn = this._createKeyButton(keyDef, spec.isNumber, k);
+                    this._setupLongPress(btn, keyDef, layout);
                 }
                 rowBox.add_child(btn);
                 rowKeys.push(btn);
@@ -819,7 +866,11 @@ export class AproposKeyboard {
             const pressed = actor.has_style_pseudo_class('pressed');
             const shifted = actor.has_style_class_name('apropos-osk-enter-shift');
             let fill, stroke;
-            if (pressed) {
+            if (this._isMaterial()) {
+                const light = this._isLight();
+                fill = light ? [0.04, 0.34, 0.82, pressed ? 0.8 : 1] : [0.66, 0.78, 0.98, pressed ? 0.8 : 1];
+                stroke = fill;
+            } else if (pressed) {
                 fill = [0.00, 0.47, 0.83, 0.78];
                 stroke = [0.60, 0.88, 1.00, 1.00];
             } else if (shifted) {
@@ -934,6 +985,231 @@ export class AproposKeyboard {
         actor._redraw();
     }
 
+    // ------------------------------------------------------------------
+    // Long-press (accents and symbols)
+    // ------------------------------------------------------------------
+
+    // Accented variants from GNOME's own on-screen keyboard layouts
+    // (/usr/share/gnome-shell/gnome-shell-osk-layouts.gresource), read at runtime.
+    _accentsFor(name) {
+        if (!name)
+            return new Map();
+        if (this._accentCache.has(name))
+            return this._accentCache.get(name);
+        const map = new Map();
+        try {
+            if (!this._oskResource) {
+                const dir = global.datadir || '/usr/share/gnome-shell';
+                this._oskResource = Gio.Resource.load(GLib.build_filenamev([dir, 'gnome-shell-osk-layouts.gresource']));
+            }
+            const bytes = this._oskResource.lookup_data(`/org/gnome/shell/osk-layouts/${name}.json`,
+                Gio.ResourceLookupFlags.NONE);
+            const data = JSON.parse(new TextDecoder().decode(bytes.get_data()));
+            for (const level of data.levels || []) {
+                for (const row of level.rows || []) {
+                    for (const key of row) {
+                        const s = key.strings;
+                        if (Array.isArray(s) && s.length > 1 && !map.has(s[0]))
+                            map.set(s[0], s.slice(1));
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('[AproposOSK] GNOME accent data unavailable:', e.message);
+        }
+        this._accentCache.set(name, map);
+        return map;
+    }
+
+    _setupLongPress(btn, keyDef, layout) {
+        if (!layout.longPress)
+            return;
+        if (keyDef.lpAlt) {
+            // Super key: hold latches Alt (no popup), the hint shows that
+            this._addHint(btn, keyDef.hint || 'Alt');
+            return;
+        }
+        if (keyDef.lpKeys && keyDef.lpKeys.length) {
+            // Special keys (Tab, Esc...) offered on long-press: popup shows their names
+            btn._longpress = keyDef.lpKeys.map(k => k.label);
+            btn._lpCodes = new Map(keyDef.lpKeys.map(k => [k.label, k.code]));
+            btn._lpShift = new Set(keyDef.lpKeys.filter(k => k.shift).map(k => k.label));
+            return;
+        }
+        if (keyDef.type)
+            return;
+        const items = [];
+        const add = c => {
+            if (c && c !== keyDef.label && !items.includes(c))
+                items.push(c);
+        };
+        (keyDef.longpress || []).forEach(add);
+        (this._accentsFor(layout.accents).get(keyDef.label) || []).forEach(add);
+        if (items.length === 0)
+            return;
+        btn._longpress = items;
+        if (keyDef.hint)
+            this._addHint(btn, keyDef.hint);
+    }
+
+    _addHint(btn, text) {
+        const hint = new St.Label({
+            text,
+            style_class: 'apropos-osk-hint',
+            reactive: false,
+        });
+        hint._btn = btn;
+        this._overlay.add_child(hint);
+        btn._hintActor = hint;
+        this._hintActors.push(hint);
+    }
+
+    // Sticky Alt on/off (Alt key, or long-press on a Super key with lpAlt)
+    _toggleAlt() {
+        this.altActive = !this.altActive;
+        if (this.altActive)
+            this._input.pressKey(56);
+        else
+            this._input.releaseKey(56);
+        this._updateModifierUI();
+    }
+
+    _superLpCancel() {
+        const st = this._superLp;
+        this._superLp = null;
+        if (st && st.timer) {
+            GLib.source_remove(st.timer);
+            st.timer = 0;
+        }
+        return st;
+    }
+
+    _longPressOn() {
+        try {
+            return this._settings.get_boolean('long-press');
+        } catch (e) {
+            return false;
+        }
+    }
+
+    _lpEligible(btn) {
+        return this._longPressOn() && !!btn._longpress && !this.fnActive &&
+            !this._leftCtrlActive && !this._rightCtrlActive && !this.altActive && !this._superDown;
+    }
+
+    _lpItems(btn) {
+        const upper = this._lettersUpper();
+        return btn._longpress.map(c => {
+            if (!upper || btn._lpCodes)
+                return c;
+            const u = c.toUpperCase();
+            return (c !== u && Array.from(u).length === 1) ? u : c;
+        });
+    }
+
+    _lpShow() {
+        const lp = this._lp;
+        if (!lp || this._activeGesture !== 'longpress' || !lp.btn.get_stage())
+            return;
+        const btn = lp.btn;
+        lp.items = this._lpItems(btn);
+        const [kx, ky] = btn.get_transformed_position();
+        const kw = btn._keyW || btn.width;
+        const kh = btn._keyH || btn.height;
+        const cellW = Math.round(Math.max(kw * 0.95, 34));
+        const cellH = Math.round(Math.max(kh * 0.95, 34));
+        const pad = 4;
+        const n = lp.items.length;
+        const popupW = n * cellW + pad * 2;
+        const monitor = Main.layoutManager.findMonitorForActor(btn) || Main.layoutManager.primaryMonitor;
+
+        const popup = new St.BoxLayout({
+            style_class: 'apropos-osk-lp-popup',
+            vertical: false,
+            reactive: false,
+        });
+        for (const cls of this._themeClasses())
+            popup.add_style_class_name(cls);
+        const fam = this._fontFamilyCss || this._computeFontFamily();
+        const fs = Math.round(Math.min(cellH * 0.45, 26));
+        lp.cells = lp.items.map(text => {
+            const label = new St.Label({
+                text,
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            label.set_style(`font-family: "${fam}"; font-size: ${fs}px;`);
+            const cell = new St.Bin({
+                style_class: 'apropos-osk-lp-cell',
+                child: label,
+            });
+            cell.set_size(cellW, cellH);
+            popup.add_child(cell);
+            return cell;
+        });
+        // First cell sits right above the key; the row grows to the right, or to the left
+        // when it would run off the screen
+        let x = kx + kw / 2 - cellW / 2 - pad;
+        if (monitor) {
+            const maxX = monitor.x + monitor.width - popupW - 2;
+            if (x > maxX)
+                x = Math.max(monitor.x + 2, kx + kw / 2 + cellW / 2 + pad - popupW);
+            x = Math.max(monitor.x + 2, Math.min(x, maxX));
+        }
+        const y = Math.max(monitor ? monitor.y : 0, ky - cellH - pad * 2 - 6);
+        popup.set_position(Math.round(x), Math.round(y));
+        Main.layoutManager.uiGroup.add_child(popup);
+        Main.layoutManager.uiGroup.set_child_above_sibling(popup, null);
+
+        lp.popup = popup;
+        lp.x0 = x + pad;
+        lp.cellW = cellW;
+        lp.cancelY = ky + kh * 1.6;
+        // Without a hint symbol the first entry is an accent: start on it as Gboard does
+        this._lpSelect(0);
+    }
+
+    _lpSelect(idx) {
+        const lp = this._lp;
+        if (!lp || !lp.cells)
+            return;
+        lp.sel = idx;
+        lp.cells.forEach((c, i) => {
+            if (i === idx)
+                c.add_style_class_name('apropos-osk-lp-cell-selected');
+            else
+                c.remove_style_class_name('apropos-osk-lp-cell-selected');
+        });
+    }
+
+    _lpMotion(event) {
+        const lp = this._lp;
+        if (!lp || !lp.popup)
+            return;
+        const [x, y] = event.get_coords();
+        if (y > lp.cancelY) {
+            this._lpSelect(-1);
+            return;
+        }
+        const n = lp.cells.length;
+        const idx = Math.max(0, Math.min(n - 1, Math.floor((x - lp.x0) / lp.cellW)));
+        if (idx !== lp.sel)
+            this._lpSelect(idx);
+    }
+
+    _lpDispose(lp) {
+        if (!lp)
+            return;
+        if (lp.timer) {
+            GLib.source_remove(lp.timer);
+            lp.timer = 0;
+        }
+        if (lp.popup) {
+            lp.popup.destroy();
+            lp.popup = null;
+        }
+    }
+
     _createKeyButton(keyDef, isNumberRow = false, indexInRow = -1) {
         const btn = new St.Button({
             label: keyDef.label || '',
@@ -985,6 +1261,25 @@ export class AproposKeyboard {
         } else if (keyDef.type === 'altgr') {
             btn.add_style_class_name('apropos-osk-key-mod');
             this._altgrButtons.push(btn);
+        }
+
+        // Split key: one button (one hit area) drawn as two small stacked keys.
+        if (keyDef.split) {
+            btn.add_style_class_name('apropos-osk-split');
+            const box = new St.BoxLayout({ vertical: true, x_expand: true, y_expand: true });
+            btn._splitHalves = Array.from(keyDef.label.split('\n')).map((t, i) => {
+                const lbl = new St.Label({ text: t, x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER, x_expand: true, y_expand: true });
+                const half = new St.Bin({
+                    style_class: 'apropos-osk-key apropos-osk-arrow apropos-osk-split-half',
+                    x_expand: true, y_expand: true, child: lbl,
+                });
+                half._code = keyDef.split[i];
+                half._label = lbl;
+                box.add_child(half);
+                return half;
+            });
+            btn._splitBox = box;
+            btn.set_child(box);
         }
 
         this._setupKeyEvents(btn, keyDef);
@@ -1069,6 +1364,8 @@ export class AproposKeyboard {
 
     // Super: attivazione fisica su sistema per combo
     _engageSuper() {
+        // Another key while Super is held: a Super combo, not an Alt long-press
+        this._superLpCancel();
         if (this._superDown && !this._superSent) {
             this._input.pressKey(this._superCode);
             this._superSent = true;
@@ -1076,6 +1373,13 @@ export class AproposKeyboard {
     }
 
     _onKeyPress(btn, keyDef, event) {
+        // Split key (▲ over ▼): the half that was touched decides the key code. The
+        // choice is kept on the button so release and key repeat use the same code.
+        if (keyDef.split) {
+            keyDef = { ...keyDef, code: this._splitCode(btn, keyDef, event) };
+            btn._splitDef = keyDef;
+        }
+        this._keySeq++;
         btn._down = true;
         btn.add_style_pseudo_class('pressed');
         this._updateKeyStyle(btn, true);
@@ -1091,6 +1395,23 @@ export class AproposKeyboard {
             this._superDown = true;
             this._superSent = false;
             this._superCode = keyDef.code || SUPER_KEYCODE;
+            this._superLpCancel();
+            // Alt latched: a tap on this key just unlatches it (handled on release)
+            this._superUnlatch = !!(keyDef.lpAlt && this.altActive);
+            if (keyDef.lpAlt && this._longPressOn() && !this._superUnlatch) {
+                const delay = Math.max(150, this._settings.get_int('long-press-delay') || 350);
+                const st = { t0: this._eventTime(event), delay, fired: false, timer: 0 };
+                st.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
+                    st.timer = 0;
+                    if (this._superLp === st && this._superDown && !this._superSent && !this._destroyed) {
+                        st.fired = true;
+                        this._toggleAlt();
+                        this._playSound();
+                    }
+                    return GLib.SOURCE_REMOVE;
+                });
+                this._superLp = st;
+            }
             return;
         }
 
@@ -1155,18 +1476,8 @@ export class AproposKeyboard {
             this._input.tapKey(57);  // Insert space
 
             // One-shot auto-release for active modifiers
-            let modChanged = false;
-            if (this.shiftActive) {
-                this._input.releaseKey(this._activeShiftCode || 42);
-                this.shiftActive = false;
-                modChanged = true;
-            }
-            if (this.altgrActive) {
-                this._input.releaseKey(100);
-                this.altgrActive = false;
-                modChanged = true;
-            }
-            if (modChanged) {
+            this._trkUnknown();
+            if (this._releaseOneShotMods()) {
                 this._updateModifierUI();
                 this._updateLabels();
             }
@@ -1187,7 +1498,25 @@ export class AproposKeyboard {
 
         // Shift modifier (tracks Left 42 vs Right 54)
         if (keyDef.type === 'shift' || keyDef.code === 42 || keyDef.code === 54) {
-            this.shiftActive = !this.shiftActive;
+            const now = GLib.get_monotonic_time();
+            const phone = !!(this._layout && this._layout.longPress);
+            if (phone && this.capsActive) {
+                // Phone style: Shift turns Caps Lock off again
+                this.capsActive = false;
+                this._input.tapKey(58);
+                this.shiftActive = false;
+            } else if (phone && !this._autoShift && this.shiftActive && now - this._lastShiftTapUs < 400000) {
+                // Phone style: double-tap Shift = Caps Lock
+                this.shiftActive = false;
+                this.capsActive = true;
+                this._input.tapKey(58);
+            } else {
+                // A manual tap on an auto-capitalized Shift means "lowercase, please"
+                this.shiftActive = this._autoShift ? false : !this.shiftActive;
+            }
+            this._autoShift = false;
+            this._acSuppressSeq = this._keySeq;
+            this._lastShiftTapUs = now;
             this._activeShiftCode = keyDef.code || 42;
             this._updateModifierUI();
             this._updateLabels();
@@ -1227,16 +1556,74 @@ export class AproposKeyboard {
             return;
         }
 
-        // Regular key press
-        if (this.shiftActive) {
-            this._input.pressKey(this._activeShiftCode || 42);
+        // Keys with accents/symbols: wait to see whether this is a tap or a long press
+        if (this._lpEligible(btn)) {
+            this._startGesture('longpress', btn, event);
+            return;
         }
 
-        this._input.pressKey(keyDef.code);
+        // Regular key press
+        this._pressRegular(keyDef);
 
         if (!['fn', 'mod', 'ctrl', 'alt', 'super', 'shift', 'caps', 'altgr'].includes(keyDef.type)) {
             this._startKeyRepeat(keyDef);
         }
+    }
+
+    _splitCode(btn, keyDef, event) {
+        try {
+            const [, y] = event.get_coords();
+            const [, top] = btn.get_transformed_position();
+            const h = btn._keyH || btn.height;
+            return y < top + h / 2 ? keyDef.split[0] : keyDef.split[1];
+        } catch (e) {
+            return keyDef.split[0];
+        }
+    }
+
+    // Plain A-Z keys only: on other keys Shift gives a different symbol (Italian è -> é),
+    // not the capital letter
+    _isLetterDef(keyDef) {
+        const l = keyDef && keyDef.label;
+        return !!keyDef && !keyDef.type && typeof l === 'string' && /^[a-z]$/i.test(l);
+    }
+
+    // Letters are upper case (Shift xor Caps Lock)
+    _lettersUpper() {
+        return this.shiftActive !== this.capsActive;
+    }
+
+    // Shift for every key (manual Shift). Auto-capitalization only shifts letters, so
+    // Enter stays Enter and digits stay digits at the start of a sentence.
+    _shiftAll() {
+        return this.shiftActive && !this._autoShift;
+    }
+
+    _pressRegular(keyDef) {
+        if (this.shiftActive && (!this._autoShift || this._isLetterDef(keyDef))) {
+            this._input.pressKey(this._activeShiftCode || 42);
+            this._shiftSent = true;
+        }
+        this._input.pressKey(keyDef.code);
+    }
+
+    // One-shot Shift/AltGr end after a typed character
+    _releaseOneShotMods() {
+        let changed = false;
+        if (this._shiftSent)
+            this._input.releaseKey(this._activeShiftCode || 42);
+        this._shiftSent = false;
+        if (this.shiftActive) {
+            this.shiftActive = false;
+            this._autoShift = false;
+            changed = true;
+        }
+        if (this.altgrActive) {
+            this._input.releaseKey(100);
+            this.altgrActive = false;
+            changed = true;
+        }
+        return changed;
     }
 
     _startGesture(type, btn, event) {
@@ -1250,7 +1637,17 @@ export class AproposKeyboard {
         this._gestureIsTouch = (event.type() === Clutter.EventType.TOUCH_BEGIN);
 
         const [x, y] = event.get_coords();
-        if (type === 'space') {
+        if (type === 'longpress') {
+            const delay = Math.max(150, this._settings.get_int('long-press-delay') || 350);
+            const lp = { btn, keyDef: btn._keyDef, popup: null, sel: -1, timer: 0, delay, t0: this._eventTime(event) };
+            lp.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
+                lp.timer = 0;
+                if (this._lp === lp)
+                    this._lpShow();
+                return GLib.SOURCE_REMOVE;
+            });
+            this._lp = lp;
+        } else if (type === 'space') {
             this._spaceStartX = x;
             this._spaceDrifting = false;
             this._currentSpaceStep = 0;
@@ -1268,6 +1665,10 @@ export class AproposKeyboard {
     }
 
     _cleanupStageGesture() {
+        if (this._lp) {
+            this._lpDispose(this._lp);
+            this._lp = null;
+        }
         if (this._stageGestureId) {
             global.stage.disconnect(this._stageGestureId);
             this._stageGestureId = 0;
@@ -1292,6 +1693,12 @@ export class AproposKeyboard {
                 : (this._gestureTouchSeq === null || seq === this._gestureTouchSeq);
 
             if (type === Clutter.EventType.TOUCH_BEGIN) {
+                // Fast two-thumb typing: a new touch while a key waits for long-press
+                // turns that key into a normal tap and lets the new touch through
+                if (this._activeGesture === 'longpress' && !(this._lp && this._lp.popup)) {
+                    this._endGesture(ev);
+                    return Clutter.EVENT_PROPAGATE;
+                }
                 return Clutter.EVENT_STOP;
             }
 
@@ -1339,6 +1746,11 @@ export class AproposKeyboard {
         if (!btn || !btn._down) return;
 
         const [currentX, currentY] = event.get_coords();
+
+        if (this._activeGesture === 'longpress') {
+            this._lpMotion(event);
+            return;
+        }
 
         if (this._activeGesture === 'space') {
             const totalDx = currentX - this._spaceStartX;
@@ -1403,15 +1815,60 @@ export class AproposKeyboard {
         }
     }
 
+    // Event timestamp in ms (from the input device), or 0 when unknown
+    _eventTime(event) {
+        try {
+            return (event && typeof event.get_time === 'function' && event.get_time()) || 0;
+        } catch (e) {
+            return 0;
+        }
+    }
+
     _endGesture(event) {
         const gesture = this._activeGesture;
         const btn = this._gestureBtn;
+        const lp = this._lp;
+        this._lp = null;
         this._cleanupStageGesture();
 
-        if (!btn) return;
+        if (!btn) {
+            this._lpDispose(lp);
+            return;
+        }
         btn._down = false;
         btn.remove_style_pseudo_class('pressed');
         this._updateKeyStyle(btn, false);
+
+        if (gesture === 'longpress') {
+            // The timer can fire late-but-first when the Shell was busy (e.g. the first app
+            // search): the events' own timestamps tell whether the finger was really held
+            const t1 = this._eventTime(event);
+            const quick = !!(lp && lp.popup && lp.t0 && t1 && t1 >= lp.t0 && t1 - lp.t0 < lp.delay);
+            const shown = !!(lp && lp.popup) && !quick;
+            const choice = shown && lp.sel >= 0 ? lp.items[lp.sel] : null;
+            this._lpDispose(lp);
+            const keyDef = btn._keyDef;
+            if (shown) {
+                const code = choice && btn._lpCodes && btn._lpCodes.get(choice);
+                if (code) {
+                    this._keySeq++;
+                    this._tsUnknown();
+                    const sh = btn._lpShift && btn._lpShift.has(choice);
+                    if (sh)
+                        this._input.tapCombo([42], code);
+                    else
+                        this._input.tapKey(code);
+                } else if (choice) {
+                    this._commitChar(choice);
+                }
+                return;
+            }
+            // Released before the popup opened: an ordinary tap
+            this._pressRegular(keyDef);
+            btn._down = true;
+            this._onKeyRelease(btn, keyDef, event);
+            return;
+        }
 
         if (gesture === 'space') {
             this._stopKeyRepeat();
@@ -1423,8 +1880,7 @@ export class AproposKeyboard {
                 btn.label = btn._keyDef?.label || 'Space';
                 this._updateKeyStyle(btn, false);
             } else {
-                this._input.tapKey(57);
-                this._tsOnSpace();
+                this._onSpaceTap();
             }
             return;
         }
@@ -1444,13 +1900,22 @@ export class AproposKeyboard {
                 this._tsUnknown();
                 return;
             }
-            this._input.tapKey(14);
-            this._tsOnBackspace();
-            if (this._smartPairStack.length > 0) {
-                this._smartPairStack.pop();
-            }
+            this._onBackspaceTap();
             return;
         }
+    }
+
+    _onBackspaceTap() {
+        // Backspace right after an autocorrection puts the original word back
+        if (this._tryRevertCorrection())
+            return;
+        this._input.tapKey(14);
+        this._tsOnBackspace();
+        this._trkBackspace();
+        if (this._smartPairStack.length > 0) {
+            this._smartPairStack.pop();
+        }
+        this._acUpdate();
     }
 
     _onKeyMotion(btn, keyDef, event) {
@@ -1471,6 +1936,12 @@ export class AproposKeyboard {
     }
 
     _onKeyRelease(btn, keyDef, event) {
+        if (keyDef.split) {
+            if (!btn._splitDef)
+                return;
+            keyDef = btn._splitDef;
+            btn._splitDef = null;
+        }
         if (this._activeGesture && this._gestureBtn === btn) {
             this._endGesture(event);
             return;
@@ -1495,8 +1966,7 @@ export class AproposKeyboard {
                 btn.label = keyDef.label || 'Space';
                 this._updateKeyStyle(btn, false);
             } else {
-                this._input.tapKey(57);
-                this._tsOnSpace();
+                this._onSpaceTap();
             }
             return;
         }
@@ -1516,20 +1986,35 @@ export class AproposKeyboard {
                 this._tsUnknown();
                 return;
             }
-            this._input.tapKey(14);
-            this._tsOnBackspace();
-            if (this._smartPairStack.length > 0) {
-                this._smartPairStack.pop();
-            }
+            this._onBackspaceTap();
             return;
         }
 
         if (keyDef.type === 'super') {
             if (!this._superDown) return;
             const code = this._superCode || SUPER_KEYCODE;
+            const st = this._superLpCancel();
+            if (st && st.fired) {
+                // Held: Alt was latched. A late timer on a quick tap (busy Shell) is undone.
+                const t1 = this._eventTime(event);
+                const quick = st.t0 && t1 && t1 >= st.t0 && t1 - st.t0 < st.delay;
+                this._superDown = false;
+                this._superSent = false;
+                if (!quick)
+                    return;
+                this._toggleAlt();
+                this._tapSuperAlone(code);
+                return;
+            }
+            const unlatch = this._superUnlatch;
+            this._superUnlatch = false;
             if (this._superSent) {
                 // Super combo: chiusura combinazione
                 this._input.releaseKey(code);
+            } else if (unlatch) {
+                // Tap while Alt latched: back to normal (no Super tap)
+                if (this.altActive)
+                    this._toggleAlt();
             } else {
                 // Super singolo: esecuzione tap al rilascio
                 this._tapSuperAlone(code);
@@ -1552,21 +2037,12 @@ export class AproposKeyboard {
 
         const typedLabel = btn.label;
         this._tsOnKey(keyDef, typedLabel);
+        this._trkOnKey(keyDef, typedLabel);
         const isAutoPairs = this._settings.get_boolean('smart-auto-pairs');
         const openingPairs = { '(': ')', '[': ']', '{': '}', '"': '"', '«': '»', "'": "'" };
 
         // Rilascio automatico modificatori
-        let modifiersChanged = false;
-        if (this.shiftActive) {
-            this._input.releaseKey(this._activeShiftCode || 42);
-            this.shiftActive = false;
-            modifiersChanged = true;
-        }
-        if (this.altgrActive) {
-            this._input.releaseKey(100);
-            this.altgrActive = false;
-            modifiersChanged = true;
-        }
+        const modifiersChanged = this._releaseOneShotMods();
 
         // Smart auto-closing
         if (isAutoPairs && openingPairs[typedLabel]) {
@@ -1582,6 +2058,7 @@ export class AproposKeyboard {
             this._updateModifierUI();
             this._updateLabels();
         }
+        this._acUpdate();
     }
 
     // Reset gesture scorrimento/selezione e rilascio tasti
@@ -1707,12 +2184,21 @@ export class AproposKeyboard {
     }
 
     _updateModifierUI() {
+        // Phone layout has no Caps key: Shift shows Caps Lock (lit + ⇪ glyph)
+        const phoneCaps = !!(this._layout && this._layout.longPress) && this.capsActive;
         for (const btn of this._shiftButtons) {
-            if (this.shiftActive) {
+            if (this.shiftActive || phoneCaps) {
                 btn.add_style_class_name('apropos-osk-key-active');
             } else {
                 btn.remove_style_class_name('apropos-osk-key-active');
             }
+            if (phoneCaps)
+                btn.add_style_class_name('apropos-osk-key-locked');
+            else
+                btn.remove_style_class_name('apropos-osk-key-locked');
+            const base = btn._keyDef?.label;
+            if (base === '⇧' || base === '⇪')
+                btn.label = phoneCaps ? '⇪' : base;
         }
 
         for (const btn of this._capsButtons) {
@@ -1758,9 +2244,15 @@ export class AproposKeyboard {
         for (const btn of this._keyActors) {
             const def = btn._keyDef;
             if (!def) continue;
-            if (def.type === 'alt' || def.code === 56) {
+            if (def.type === 'alt' || def.code === 56 || def.lpAlt) {
                 if (this.altActive) btn.add_style_class_name('apropos-osk-key-active');
                 else btn.remove_style_class_name('apropos-osk-key-active');
+            }
+            if (def.lpAlt) {
+                // Super key with latched Alt reads "Alt" while it is held
+                btn.label = this.altActive ? 'Alt' : def.label;
+                if (btn._hintActor)
+                    btn._hintActor.visible = !this.altActive;
             }
         }
 
@@ -1768,7 +2260,7 @@ export class AproposKeyboard {
         if (this._enterButtons) {
             for (const btn of this._enterButtons) {
                 if (btn._isEnterPlaceholder) continue;
-                if (this.shiftActive) {
+                if (this._shiftAll()) {
                     btn.add_style_class_name('apropos-osk-enter-shift');
                     btn.label = 'New line';
                 } else {
@@ -1782,7 +2274,8 @@ export class AproposKeyboard {
 
     _updateLabels() {
         this._fontFamilyCss = this._computeFontFamily();
-        const isUpper = (this.shiftActive && !this.capsActive) || (!this.shiftActive && this.capsActive);
+        const isUpper = this._lettersUpper();
+        const shiftAll = this._shiftAll();
 
         for (const btn of this._keyActors) {
             const def = btn._keyDef;
@@ -1790,30 +2283,37 @@ export class AproposKeyboard {
 
             let targetLabel = def.label;
             let modType = null; // 'shift', 'altgr', 'both', 'fn'
+            const isLetter = this._isLetterDef(def);
 
             if (this.fnActive && btn._isFnNumberKey) {
                 targetLabel = btn._fnLabel;
                 modType = 'fn';
-            } else if (this.shiftActive && this.altgrActive && def.shiftAltgr) {
+            } else if (shiftAll && this.altgrActive && def.shiftAltgr) {
                 targetLabel = def.shiftAltgr;
                 modType = 'both'; // Shift + AltGr: lighter greenish-grey
             } else if (this.altgrActive && def.altgr) {
                 targetLabel = def.altgr;
                 modType = 'altgr'; // AltGr: dark green infused grey
-            } else if (this.shiftActive && def.shift) {
+            } else if (isLetter && def.shift) {
+                // Letters follow Shift xor Caps Lock
+                targetLabel = isUpper ? def.shift : def.label;
+            } else if (shiftAll && def.shift) {
                 targetLabel = def.shift;
-                if (!(def.label.length === 1 && def.label.match(/[a-z]/i))) {
+                if (def.shift !== def.label)
                     modType = 'shift'; // Shift: pure grey
-                }
-            } else if (isUpper && def.shift && def.label.length === 1 && def.label.match(/[a-z]/i)) {
-                targetLabel = def.shift;
+            } else if (def.lpAlt && this.altActive) {
+                targetLabel = 'Alt';
             } else if (def.type === 'enter') {
-                targetLabel = this.shiftActive ? 'New line' : def.label;
+                targetLabel = shiftAll ? 'New line' : def.label;
+            } else if (def.type === 'shift' && def.label === '⇧' && this.capsActive &&
+                       this._layout && this._layout.longPress) {
+                targetLabel = '⇪';
             } else {
                 targetLabel = def.label;
             }
 
-            btn.label = targetLabel;
+            if (!def.split)
+                btn.label = targetLabel;
             btn._modType = modType;
             btn._isCurrentlyModified = (modType !== null);
 
@@ -1840,7 +2340,7 @@ export class AproposKeyboard {
     }
 
     _toggleLayout() {
-        const sequence = ['it', 'us', 'custom'];
+        const sequence = ['it', 'us', 'phone', 'custom'];
         let idx = sequence.indexOf(this._currentLayoutKey);
         if (idx === -1) idx = 0;
         const nextKey = sequence[(idx + 1) % sequence.length];
@@ -2125,6 +2625,19 @@ export class AproposKeyboard {
                     btn._baseRadius = radius;
                     btn._baseMarginRight = marginRight;
                     this._updateKeyStyle(btn, false);
+
+                    // Long-press symbol shown small in the top-right corner
+                    if (btn._hintActor) {
+                        const hint = btn._hintActor;
+                        const hw = Math.round(kw * 0.45);
+                        const hh = Math.round(keyHeight * 0.42);
+                        const hfs = Math.max(9, Math.round(keyHeight * 0.22));
+                        hint.visible = this._longPressOn() &&
+                            !(btn._keyDef?.lpAlt && this.altActive);
+                        hint.set_size(hw, hh);
+                        hint.set_position(row.xs[i] + kw - hw - Math.round(kw * 0.08), row.top + 2);
+                        hint.set_style(`font-family: "${this._fontFamilyCss || this._computeFontFamily()}"; font-size: ${hfs}px; text-align: right;`);
+                    }
                 }
             }
 
@@ -2154,6 +2667,7 @@ export class AproposKeyboard {
         this._tsPlayId = 0;
         this._tsStageId = 0;
         this._tsLoadLearned();
+        this._nwInit();
         this._tbShown = [];
         try {
             this._tbBridge = new TypingBoosterBridge(() => this._tsRefresh());
@@ -2174,6 +2688,22 @@ export class AproposKeyboard {
                         return GLib.SOURCE_REMOVE;
                     });
                 }));
+            // Overview opens/closes: switch engine and auto-caps right away, before the first key
+            this._tbOverviewIds = ['showing', 'hidden'].map(sig => Main.overview.connect(sig, () => {
+                if (this._tbWanted())
+                    this._tbSync();
+                this._acUpdate();
+            }));
+            this._tbFocusId = global.stage.connect('notify::key-focus', () => {
+                if (this._tbFieldSyncId)
+                    return;
+                this._tbFieldSyncId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                    this._tbFieldSyncId = 0;
+                    if (this._tbWanted())
+                        this._tbSync();
+                    return GLib.SOURCE_REMOVE;
+                });
+            });
         } catch (err) {
             console.warn('[AproposOSK] typing-booster bridge unavailable:', err);
             this._tbBridge = null;
@@ -2205,6 +2735,20 @@ export class AproposKeyboard {
         }
     }
 
+    // Typing goes to the shell itself (app search, run dialog, lock screen), not an app.
+    // In the overview the search entry only takes focus after the first key, so the
+    // overview counts as shell even before that.
+    _focusInShell() {
+        try {
+            if (Main.overview.visible || Main.modalCount > 0)
+                return true;
+            const f = global.stage.get_key_focus();
+            return !!f && f !== global.stage && f instanceof Clutter.Text;
+        } catch (err) {
+            return false;
+        }
+    }
+
     // ---- typing-booster mode ---------------------------------------------
     _tbWanted() {
         try {
@@ -2225,7 +2769,9 @@ export class AproposKeyboard {
         try {
             // typing-booster composes words as preedit; in URL/e-mail/password fields that
             // breaks inline autocompletion (Chrome's address bar), so use plain xkb there.
-            if (this.isOpen && this._tbWanted() && this._fieldTypeAllowed())
+            // Shell entries (app search, run dialog) react to committed text only, so a
+            // preedit word would not filter anything until Enter/Tab: use plain xkb there.
+            if (this.isOpen && this._tbWanted() && this._fieldTypeAllowed() && !this._focusInShell())
                 this._tbBridge.start();
             else
                 this._tbBridge.stop();
@@ -2286,14 +2832,23 @@ export class AproposKeyboard {
             btn.visible = btn._tsRank >= 0;
             btn.opacity = 0;
             btn.connect('clicked', () => {
+                if (this._nwShown && this._nwShown.length) {
+                    const w = this._nwShown[btn._tsRank];
+                    if (w)
+                        this._nwAccept(w);
+                    return;
+                }
                 if (this._tbOn()) {
                     const c = this._tbShown && this._tbShown[btn._rank];
                     if (c && typeof c.cb === 'function') {
+                        this._keySeq++;
+                        this._nwOnTbCandidate(c.text);
                         try {
                             c.cb();
                         } catch (err) {
                             console.warn('[AproposOSK] typing-booster commit failed:', err);
                         }
+                        this._acUpdate();
                     }
                     return;
                 }
@@ -2328,9 +2883,15 @@ export class AproposKeyboard {
         if (!this._suggestBtns)
             return;
         const fam = this._fontFamilyCss || 'sans-serif';
+        let colors = 'color: #f3f3f3; background-color: rgba(255, 255, 255, 0.07);';
+        if (this._isMaterial()) {
+            colors = this._isLight()
+                ? 'color: #1f1f1f; background-color: transparent;'
+                : 'color: #e3e3e3; background-color: transparent;';
+        }
         for (const b of this._suggestBtns) {
-            b.set_style(`font-family: "${fam}"; font-size: 15px; color: #f3f3f3; ` +
-                'background-color: rgba(255, 255, 255, 0.07); border-radius: 6px; margin: 3px 3px; padding: 0 8px;');
+            b.set_style(`font-family: "${fam}"; font-size: 15px; ${colors} ` +
+                'border-radius: 6px; margin: 3px 3px; padding: 0 8px;');
             const ct = this._getClutterText(b);
             if (ct)
                 ct.font_name = `${fam} 15px`;
@@ -2360,6 +2921,15 @@ export class AproposKeyboard {
             return;
         this._tsTailId = GLib.idle_add(GLib.PRIORITY_LOW, () => {
             this._tsTailId = 0;
+            // Preferred: the bundled frequency list, so common words come first
+            try {
+                this._loadFreq();
+                if (this._freq && this._freq.size > 0) {
+                    const known = new Set(this._tsBase || []);
+                    this._tsTail = this._freq.words().filter(w => /^[a-z]{3,14}$/.test(w) && !known.has(w));
+                    return GLib.SOURCE_REMOVE;
+                }
+            } catch (err) {}
             try {
                 const f = Gio.File.new_for_path('/usr/share/hunspell/en_US.dic');
                 if (f.query_exists(null)) {
@@ -2405,6 +2975,7 @@ export class AproposKeyboard {
     }
 
     _tsSaveNow() {
+        this._nwSaveNow();
         if (!this._tsLearnedDirty)
             return;
         try {
@@ -2463,6 +3034,7 @@ export class AproposKeyboard {
 
     // The text before the cursor is no longer known: stay quiet until the next word boundary
     _tsUnknown() {
+        this._trkUnknown();
         this._tsReset(true);
     }
 
@@ -2538,12 +3110,15 @@ export class AproposKeyboard {
     }
 
     _tsOnOpen() {
+        // Taps outside the keyboard move the cursor: needed by suggestions and by the
+        // typing assistance (auto-capitalization, autocorrect), so always watched
+        this._tsAttachStage();
         if (!this._tsEnabled())
             return;
         this._tsLoadBase();
         this._tsLoadTail();
+        this._nwLoadTb();
         this._tsReset(false);
-        this._tsAttachStage();
         if (this._tbWanted())
             this._tbSync();
     }
@@ -2589,6 +3164,12 @@ export class AproposKeyboard {
             if (this._tbImIds)
                 this._tbImIds.forEach(id => Main.inputMethod.disconnect(id));
             this._tbImIds = null;
+            if (this._tbFocusId)
+                global.stage.disconnect(this._tbFocusId);
+            this._tbFocusId = 0;
+            if (this._tbOverviewIds)
+                this._tbOverviewIds.forEach(id => Main.overview.disconnect(id));
+            this._tbOverviewIds = null;
             if (this._tbFieldSyncId) {
                 GLib.source_remove(this._tbFieldSyncId);
                 this._tbFieldSyncId = 0;
@@ -2609,6 +3190,237 @@ export class AproposKeyboard {
             this._tsPlayId = 0;
         }
         this._tsFlushSave();
+    }
+
+    // ---- next-word prediction --------------------------------------------
+    // Shown in the suggestion bar when nothing is being typed (after a space, or at the
+    // start of a sentence). Learns word pairs typed with this keyboard; also uses the
+    // pairs Typing Booster has learned and a small bundled starter list.
+    _nwInit() {
+        this._nw = new TL.NextWords();
+        this._nwShown = [];
+        this._nwCtx = null;
+        this._nwLast = null;
+        this._nwDirty = false;
+        this._nwTbLoadedUs = 0;
+        this._nwTbProc = null;
+        try {
+            const p = GLib.build_filenamev([this._extension.path, 'next-words-en.txt']);
+            const [ok, bytes] = Gio.File.new_for_path(p).load_contents(null);
+            if (ok)
+                this._nw.loadSeed(new TextDecoder().decode(bytes));
+        } catch (err) {
+            console.warn('[AproposOSK] Could not load next-words-en.txt:', err.message);
+        }
+        try {
+            const f = Gio.File.new_for_path(this._nwPath());
+            if (f.query_exists(null)) {
+                const [ok, bytes] = f.load_contents(null);
+                const obj = ok ? JSON.parse(new TextDecoder().decode(bytes)) : null;
+                if (obj && typeof obj === 'object')
+                    this._nw.learned = obj;
+            }
+        } catch (err) {
+            console.warn('[AproposOSK] Could not read learned word pairs:', err.message);
+        }
+        this._nwReady = true;
+    }
+
+    _nwPath() {
+        return GLib.build_filenamev([GLib.get_user_config_dir(), 'apropos-osk', 'learned-pairs.json']);
+    }
+
+    _nwSaveNow() {
+        if (!this._nwReady || !this._nwDirty)
+            return;
+        try {
+            this._nw.prune();
+            const dir = GLib.build_filenamev([GLib.get_user_config_dir(), 'apropos-osk']);
+            GLib.mkdir_with_parents(dir, 0o700);
+            Gio.File.new_for_path(this._nwPath()).replace_contents(JSON.stringify(this._nw.learned),
+                null, false, Gio.FileCreateFlags.REPLACE_DESTINATION | Gio.FileCreateFlags.PRIVATE, null);
+            this._nwDirty = false;
+        } catch (err) {
+            console.warn('[AproposOSK] Could not save learned word pairs:', err.message);
+        }
+    }
+
+    _nwLearn(ctx, word, inc = 1) {
+        this._nw.learn(ctx, word, inc);
+        this._nwDirty = true;
+        this._tsScheduleSave();
+    }
+
+    // Word pairs from Typing Booster's user database (read-only, at most every 10 minutes)
+    _nwLoadTb() {
+        if (!this._nwReady || this._nwTbProc)
+            return;
+        const now = GLib.get_monotonic_time();
+        if (this._nwTbLoadedUs && now - this._nwTbLoadedUs < 600 * 1000000)
+            return;
+        const db = GLib.build_filenamev([GLib.get_user_data_dir(), 'ibus-typing-booster', 'user.db']);
+        if (!GLib.file_test(db, GLib.FileTest.EXISTS))
+            return;
+        this._nwTbLoadedUs = now;
+        const script = [
+            'import sqlite3, json, sys, re',
+            "c = sqlite3.connect('file:' + sys.argv[1] + '?mode=ro', uri=True)",
+            "w = re.compile(r\"^[^\\W\\d_]+(?:['’][^\\W\\d_]+)*$\")",
+            'out = {}',
+            "for p, ph, f in c.execute('select p_phrase, phrase, sum(user_freq) from phrases ' +",
+            "        \"where p_phrase != '' group by lower(p_phrase), lower(phrase) order by 3 desc limit 20000\"):",
+            '    if w.match(p) and w.match(ph):',
+            '        d = out.setdefault(p.lower(), {})',
+            '        d[ph.lower()] = d.get(ph.lower(), 0) + int(f or 1)',
+            'print(json.dumps(out))',
+        ].join('\n');
+        try {
+            const proc = Gio.Subprocess.new(['python3', '-I', '-c', script, db],
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
+            this._nwTbProc = proc;
+            proc.communicate_utf8_async(null, null, (pr, res) => {
+                this._nwTbProc = null;
+                try {
+                    const [, out] = pr.communicate_utf8_finish(res);
+                    if (this._destroyed || !pr.get_successful() || !out)
+                        return;
+                    const obj = JSON.parse(out);
+                    if (obj && typeof obj === 'object' && this._nw)
+                        this._nw.tb = obj;
+                } catch (err) {}
+            });
+        } catch (err) {
+            this._nwTbProc = null;
+        }
+    }
+
+    _nwAllowed() {
+        try {
+            return this._nwReady && this._tsEnabled() && this._tsFieldAllowed() &&
+                !this._focusInShell() && !Main.inputMethod.hasPreedit?.();
+        } catch (err) {
+            return false;
+        }
+    }
+
+    // Text left of the cursor: the keyboard's own record if it has words in it, else the app's
+    _nwContextText() {
+        const t = this._typed;
+        if (t !== null && t.trim().length > 0)
+            return t;
+        const s = this._surroundingBefore();
+        return s !== null ? s : t;
+    }
+
+    // Fills the bar with predictions; false when there are none
+    _nwShowPredictions() {
+        this._nwShown = [];
+        this._nwCtx = null;
+        if (!this._nwAllowed())
+            return false;
+        const ctx = TL.predictionContext(this._nwContextText());
+        if (!ctx)
+            return false;
+        const words = this._nw.predict(ctx, 3).map(w => TL.casePrediction(w, ctx));
+        if (!words.length)
+            return false;
+        this._nwShown = words;
+        this._nwCtx = ctx;
+        for (const b of this._suggestBtns) {
+            b.visible = b._tsRank >= 0;
+            const w = words[b._tsRank] || '';
+            b.label = w;
+            b.reactive = !!w;
+            b.opacity = w ? 255 : 0;
+        }
+        return true;
+    }
+
+    _nwAccept(word) {
+        const ctx = this._nwCtx;
+        const low = word.replace(/’/g, "'").toLowerCase();
+        const before = this._nwContextText();
+        this._keySeq++;
+        this._lastCorrection = null;
+        if (ctx) {
+            this._nwLearn(ctx, low);
+            this._nwLast = { ctx, word: low };
+        }
+        if (!this._tbOn() && low.length >= 3)
+            this._tsLearn(low);
+        this._trkSet((before ?? '') + word + ' ');
+        this._tsBuf = '';
+        this._tsSuppress = false;
+        // A space right after this gives "word. " like after a typed word
+        this._lastSpaceUs = GLib.get_monotonic_time();
+        this._lastSpaceSeq = this._keySeq;
+        this._typeText(word + ' ');
+        this._acUpdate();
+    }
+
+    // Learn the pair completed by the word at the end of `textBefore` (a terminator follows)
+    _nwLearnAt(textBefore) {
+        this._nwLast = null;
+        if (!this._nwReady || textBefore === null || textBefore === undefined)
+            return;
+        if (!this._tsEnabled() || !this._tsFieldAllowed() || this._focusInShell())
+            return;
+        const pair = TL.pairBefore(textBefore);
+        if (!pair)
+            return;
+        const [ctx, word] = pair;
+        if (ctx === TL.SENTENCE_START) {
+            // Text typed since a cursor move does not show where the sentence starts:
+            // check with the app (its text lacks a Typing Booster preedit, may lack the word)
+            const wlen = TL.wordBefore(textBefore).length;
+            if (textBefore.slice(0, textBefore.length - wlen).trim().length === 0) {
+                let s = this._surroundingBefore();
+                if (s !== null && s.endsWith(textBefore.slice(-wlen)))
+                    s = s.slice(0, s.length - wlen);
+                if (s === null || TL.wantsCapital(s) !== true)
+                    return;
+            }
+        }
+        this._nwLearn(ctx, word);
+        this._nwLast = { ctx, word };
+    }
+
+    // Autocorrect replaced the word just learned: learn the fix instead
+    _nwOnCorrected(orig, fix) {
+        const l = this._nwLast;
+        const o = orig.replace(/’/g, "'").toLowerCase();
+        const f = fix.replace(/’/g, "'").toLowerCase();
+        if (l && l.word === o && o !== f) {
+            this._nwLearn(l.ctx, o, -1);
+            this._nwLearn(l.ctx, f);
+            this._nwLast = { ctx: l.ctx, word: f };
+        }
+        this._tsRefresh();
+    }
+
+    // A Typing Booster candidate replaces the word being typed (plus a space by default)
+    _nwOnTbCandidate(text) {
+        const t = this._typed;
+        if (t === null || !text) {
+            this._trkUnknown();
+            return;
+        }
+        const head = t.replace(/\p{L}+(?:['’]\p{L}+)*['’]?$/u, '');
+        this._nwLearnAt(head + text);
+        let space = true;
+        try {
+            // (an uninstalled schema would abort the Shell: look it up first)
+            if (this._nwTbSettings === undefined) {
+                const id = 'org.freedesktop.ibus.engine.typing-booster';
+                const schema = Gio.SettingsSchemaSource.get_default()?.lookup(id, true);
+                this._nwTbSettings = schema && schema.has_key('addspaceoncommit')
+                    ? new Gio.Settings({ schema_id: id, path: '/org/freedesktop/ibus/engine/typing-booster/' })
+                    : null;
+            }
+            if (this._nwTbSettings)
+                space = this._nwTbSettings.get_boolean('addspaceoncommit');
+        } catch (err) {}
+        this._trkSet(head + text + (space ? ' ' : ''));
     }
 
     // ---- suggestions ----------------------------------------------------
@@ -2666,6 +3478,9 @@ export class AproposKeyboard {
                 c = this._tbBridge.candidates.slice(0, 6);
             this._tbShown = c;
             this._tsShown = [];
+            if (!c.length && this._nwShowPredictions())
+                return;
+            this._nwShown = [];
             for (const b of this._suggestBtns) {
                 b.visible = true;
                 const w = (c[b._rank] && c[b._rank].text) || '';
@@ -2680,6 +3495,9 @@ export class AproposKeyboard {
         if (this._tsEnabled() && !this._tsSuppress && this._tsBuf.length >= 2 && this._tsFieldAllowed())
             words = this._tsSuggest(this._tsBuf).map(w => this._tsMimicCase(this._tsBuf, w));
         this._tsShown = words;
+        if (!words.length && !this._tsBuf && this._nwShowPredictions())
+            return;
+        this._nwShown = [];
         for (const b of this._suggestBtns) {
             b.visible = b._tsRank >= 0;
             const w = words[b._tsRank] || '';
@@ -2704,18 +3522,23 @@ export class AproposKeyboard {
         return null;
     }
 
+    // Plays key steps ({code, shift} or {keyval}) 20 ms apart. Steps queue up behind any
+    // playback that is still running, so a correction never cuts another one short.
     _tsPlay(steps) {
-        if (this._tsPlayId) {
-            GLib.source_remove(this._tsPlayId);
-            this._tsPlayId = 0;
-        }
-        let i = 0;
+        this._tsPlayQueue = (this._tsPlayQueue || []).concat(steps);
+        if (this._tsPlayId)
+            return;
         this._tsPlayId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 20, () => {
-            if (i >= steps.length || !this._input) {
+            if (!this._tsPlayQueue.length || !this._input) {
                 this._tsPlayId = 0;
+                this._tsPlayQueue = [];
                 return GLib.SOURCE_REMOVE;
             }
-            const s = steps[i++];
+            const s = this._tsPlayQueue.shift();
+            if (s.keyval) {
+                this._input.tapKeyval(s.keyval);
+                return GLib.SOURCE_CONTINUE;
+            }
             if (s.shift)
                 this._input.pressKey(42);
             this._input.pressKey(s.code);
@@ -2744,11 +3567,506 @@ export class AproposKeyboard {
             steps.push(key);
         }
         steps.push({ code: 57, shift: false });   // trailing space
+        this._keySeq++;
+        if (this._typed !== null && this._typed.endsWith(typed))
+            this._trkSet(this._typed.slice(0, this._typed.length - typed.length) + word + ' ');
+        else
+            this._trkUnknown();
         this._tsLearn(word.toLowerCase());
         this._tsBuf = '';
         this._tsSuppress = false;
         this._tsRefresh();
         this._tsPlay(steps);
+        this._acUpdate();
+    }
+
+    // ------------------------------------------------------------------
+    // Text typed since the last cursor move. Only what this keyboard typed is known;
+    // a tap outside the keyboard, arrow keys, shortcuts or key repeat make it unknown.
+    // ------------------------------------------------------------------
+    _trkUnknown() {
+        this._typed = null;
+        this._lastCorrection = null;
+    }
+
+    _trkSet(text) {
+        this._typed = text.length > 200 ? text.slice(-200) : text;
+    }
+
+    _trkAppend(str) {
+        // Typing after an unknown point still gives a known suffix of the text
+        this._trkSet((this._typed ?? '') + str);
+    }
+
+    _trkBackspace() {
+        if (this._typed === null)
+            return;
+        if (this._typed.length === 0) {
+            this._typed = null;
+            return;
+        }
+        const a = Array.from(this._typed);
+        a.pop();
+        this._typed = a.join('');
+    }
+
+    _trkOnKey(keyDef, label) {
+        const mods = this._leftCtrlActive || this._rightCtrlActive || this.altActive || this._superDown;
+        if (mods) {
+            this._trkUnknown();
+            return;
+        }
+        if (keyDef.type === 'enter') {
+            this._nwLearnAt(this._typed);
+            this._trkAppend('\n');
+            return;
+        }
+        if (keyDef.type || !label || Array.from(label).length !== 1) {
+            this._trkUnknown();
+            return;
+        }
+        const before = this._typed;
+        if (AC_TERMINATORS.has(label))
+            this._nwLearnAt(before);
+        this._trkAppend(label);
+        if (label !== ' ' && AC_TERMINATORS.has(label))
+            this._acMaybeCorrect(before, label);
+    }
+
+    // ------------------------------------------------------------------
+    // Typing characters that may not be on the layout (long-press, corrections)
+    // ------------------------------------------------------------------
+    _canTypeWithKeys(str) {
+        return Array.from(str).every(ch => ch === ' ' || this._tsKeyFor(ch));
+    }
+
+    _keySteps(str) {
+        const steps = [];
+        for (const ch of Array.from(str)) {
+            if (ch === ' ') {
+                steps.push({ code: 57, shift: false });
+                continue;
+            }
+            const key = this._tsKeyFor(ch);
+            if (key) {
+                steps.push(key);
+            } else {
+                const kv = Clutter.unicode_to_keysym(ch.codePointAt(0));
+                if (!kv)
+                    return null;
+                steps.push({ keyval: kv });
+            }
+        }
+        return steps;
+    }
+
+    // Same order of preference as GNOME's own keyboard: through the input method when
+    // Typing Booster is active, as a text commit when a text field has input focus,
+    // and as key events otherwise (e.g. X11 apps).
+    async _typeText(str) {
+        if (!str)
+            return;
+        const im = Main.inputMethod;
+        if (this._canTypeWithKeys(str) || !im.currentFocus) {
+            const steps = this._keySteps(str);
+            if (steps)
+                this._tsPlay(steps);
+            return;
+        }
+        if (this._tbOn()) {
+            for (const ch of Array.from(str)) {
+                const kv = Clutter.unicode_to_keysym(ch.codePointAt(0));
+                let handled = false;
+                try {
+                    // eslint-disable-next-line no-await-in-loop
+                    handled = await im.handleVirtualKey(kv);
+                } catch (e) {}
+                if (!handled && this._input)
+                    this._input.tapKeyval(kv);
+            }
+            return;
+        }
+        im.commit(str);
+    }
+
+    // A character chosen from the long-press popup
+    _commitChar(ch) {
+        this._keySeq++;
+        if (Array.from(ch).length === 1 && this._tsKeyFor(ch)) {
+            const k = this._tsKeyFor(ch);
+            this._tsPlay([k]);
+        } else {
+            this._typeText(ch);
+        }
+        this._tsOnKey({}, ch);
+        const before = this._typed;
+        if (AC_TERMINATORS.has(ch))
+            this._nwLearnAt(before);
+        this._trkAppend(ch);
+        if (this._releaseOneShotMods()) {
+            this._updateModifierUI();
+            this._updateLabels();
+        }
+        if (AC_TERMINATORS.has(ch))
+            this._acMaybeCorrect(before, ch);
+        this._acUpdate();
+    }
+
+    // ------------------------------------------------------------------
+    // Space: double-space period and autocorrect
+    // ------------------------------------------------------------------
+    _onSpaceTap() {
+        const now = GLib.get_monotonic_time();
+        const typed = this._typed;
+        const doublePeriod = this._settings.get_boolean('double-space-period') &&
+            typed !== null && /[\p{L}\p{N}] $/u.test(typed) &&
+            this._lastSpaceSeq === this._keySeq - 1 && now - this._lastSpaceUs < 1000000 &&
+            this._tsFieldAllowed() && this._tsKeyFor('.');
+        if (doublePeriod) {
+            // "word␣" + space -> "word.␣"
+            this._lastSpaceUs = 0;
+            this._lastSpaceSeq = -1;
+            this._lastCorrection = null;
+            this._tsPlay([{ code: 14, shift: false }, this._tsKeyFor('.'), { code: 57, shift: false }]);
+            this._trkSet(typed.slice(0, -1) + '. ');
+            this._tsReset(false);
+            this._acUpdate(true);
+            return;
+        }
+        this._input.tapKey(57);
+        this._tsOnSpace();
+        this._lastSpaceUs = now;
+        this._lastSpaceSeq = this._keySeq;
+        this._nwLearnAt(typed);
+        this._trkAppend(' ');
+        this._acMaybeCorrect(typed, ' ');
+        this._acUpdate();
+    }
+
+    // ------------------------------------------------------------------
+    // Autocorrect (English): Enchant decides whether a word is misspelled, the bundled
+    // frequency list (textlogic.js) picks the fix. Runs after space or punctuation.
+    // ------------------------------------------------------------------
+    _acEnabled() {
+        try {
+            // English word list only: stay off when the system language is not English
+            if (!/^en(_|$|\.)/.test(GLib.get_language_names()[0] || ''))
+                return false;
+            return this._settings.get_boolean('autocorrect');
+        } catch (e) {
+            return false;
+        }
+    }
+
+    _acLang() {
+        for (const n of GLib.get_language_names()) {
+            const m = /^(en_[A-Z]{2})/.exec(n);
+            if (m)
+                return m[1];
+        }
+        return 'en_US';
+    }
+
+    _acPrepare() {
+        if (!this._acEnabled())
+            return;
+        if (!this._spell)
+            this._spell = new SpellChecker(this._acLang());
+        if (this._freq || this._freqId)
+            return;
+        this._freqId = GLib.idle_add(GLib.PRIORITY_LOW, () => {
+            this._freqId = 0;
+            this._loadFreq();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _loadFreq() {
+        if (this._freq)
+            return;
+        try {
+            const p = GLib.build_filenamev([this._extension.path, 'words-freq-en.txt']);
+            const [ok, bytes] = Gio.File.new_for_path(p).load_contents(null);
+            this._freq = new TL.WordFreq(ok ? new TextDecoder().decode(bytes) : '');
+        } catch (e) {
+            console.warn('[AproposOSK] Could not load words-freq-en.txt:', e.message);
+            this._freq = new TL.WordFreq('');
+        }
+    }
+
+    // textBefore: tracked text before the terminator; term: the character just typed
+    async _acMaybeCorrect(textBefore, term) {
+        try {
+            if (!this._acEnabled() || textBefore === null || textBefore === undefined)
+                return;
+            // (A Typing Booster preedit is only committed after this; _replaceTail checks it)
+            if (!this._tsFieldAllowed())
+                return;
+            const word = TL.wordBefore(textBefore);
+            if (!word)
+                return;
+            // Is the start of the word known? (otherwise only the surrounding text can tell)
+            const pre = textBefore.slice(0, textBefore.length - word.length);
+            const startKnown = pre.length > 0;
+            const seq = this._keySeq;
+            const low = word.toLowerCase();
+            if ((this._tsLearned[low] || 0) >= 3)
+                return;     // the user insists on this spelling
+
+            let fix = null;
+            if (TL.SPECIAL[low]) {
+                fix = TL.mimicCase(word, TL.SPECIAL[low]);
+            } else {
+                if (!TL.correctable(word) || !this._freq || !this._spell)
+                    return;
+                const res = await this._spell.check(word);
+                if (!res || res.ok)
+                    return;
+                // Only the case differs ("linux" -> "Linux", "lol" -> "LOL"): leave it
+                if (res.suggestions.some(s => s.toLowerCase() === low))
+                    return;
+                // Only real words may replace it: the frequency list comes from subtitles and
+                // contains some common misspellings, so candidates the spell checker did
+                // not suggest itself are checked first
+                const sugg = new Set(res.suggestions.map(s => s.toLowerCase()));
+                const ranked = TL.rankCorrections(word, this._freq, res.suggestions).slice(0, 4);
+                const valid = [];
+                for (const it of ranked) {
+                    // eslint-disable-next-line no-await-in-loop
+                    const ok = sugg.has(it.c) || (await this._spell.check(it.c))?.ok;
+                    if (ok)
+                        valid.push(it);
+                }
+                fix = TL.pickConfident(word, valid);
+            }
+            if (!fix || fix === word || seq !== this._keySeq || this._destroyed)
+                return;
+            const done = await this._replaceTail(word + term, fix + term, startKnown, seq);
+            if (!done)
+                return;
+            this._lastCorrection = { orig: word, fix, term, seq: this._keySeq };
+            this._nwOnCorrected(word, fix);
+            if (!this._tbOn()) {
+                // Learn the fix, not the typo
+                if (this._tsLearned[low]) {
+                    this._tsLearned[low] -= 1;
+                    if (this._tsLearned[low] <= 0)
+                        delete this._tsLearned[low];
+                }
+                if (/^\p{L}+$/u.test(fix) && fix.length >= 3)
+                    this._tsLearn(fix.toLowerCase());
+            }
+        } catch (e) {
+            console.warn('[AproposOSK] autocorrect failed:', e.message);
+        }
+    }
+
+    // Text left of the cursor from the app, or null when the app does not report it
+    _surroundingBefore() {
+        try {
+            const [text, cursor] = Main.inputMethod.getSurroundingText();
+            if (text === null || text === undefined || cursor === null || cursor === undefined)
+                return null;
+            return GLib.utf8_substring(text, 0, cursor);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // Ask the app for its current text and wait briefly for the answer
+    _freshSurrounding(timeoutMs = 150) {
+        const im = Main.inputMethod;
+        if (!im.currentFocus)
+            return Promise.resolve(null);
+        return new Promise(resolve => {
+            let sigId = 0;
+            let timer = 0;
+            const finish = () => {
+                if (!this._waiters.has(finish))
+                    return;
+                this._waiters.delete(finish);
+                if (sigId)
+                    im.disconnect(sigId);
+                if (timer)
+                    GLib.source_remove(timer);
+                sigId = 0;
+                timer = 0;
+                resolve(this._destroyed ? null : this._surroundingBefore());
+            };
+            this._waiters.add(finish);
+            sigId = im.connect('surrounding-text-set', finish);
+            timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, timeoutMs, () => {
+                timer = 0;
+                finish();
+                return GLib.SOURCE_REMOVE;
+            });
+            try {
+                im.request_surrounding();
+            } catch (e) {
+                finish();
+            }
+        });
+    }
+
+    // Replace `oldTail` (just left of the cursor) with `newText`. Uses the app's surrounding
+    // text when available: it checks that the text really ends with oldTail and swaps it in
+    // one step. Without it, falls back to Backspace + retyping, but only when the start of
+    // the word is known.
+    async _replaceTail(oldTail, newText, startKnown, seq) {
+        // The app may not have received the last key yet: re-check briefly
+        let before = null;
+        for (let attempt = 0; attempt < 8; attempt++) {
+            // eslint-disable-next-line no-await-in-loop
+            before = await this._freshSurrounding();
+            if (seq !== this._keySeq || this._destroyed || !this.isOpen)
+                return false;
+            if (before === null || before.endsWith(oldTail))
+                break;
+            // eslint-disable-next-line no-await-in-loop
+            await new Promise(r => this._oneShot(40, r));
+        }
+        if (seq !== this._keySeq || this._destroyed || !this.isOpen)
+            return false;
+        const n = Array.from(oldTail).length;
+        const im = Main.inputMethod;
+        if (before !== null) {
+            if (!before.endsWith(oldTail))
+                return false;
+            const prev = Array.from(before.slice(0, before.length - oldTail.length)).pop();
+            if (prev && /[\p{L}\p{N}'’_-]/u.test(prev))
+                return false;   // part of a longer word
+            if (im.hasPreedit?.())
+                return false;
+            im.delete_surrounding(-n, n);
+            im.commit(newText);
+        } else {
+            if (!startKnown)
+                return false;
+            const steps = [];
+            for (let i = 0; i < n; i++)
+                steps.push({ code: 14, shift: false });
+            const typed = this._keySteps(newText);
+            if (!typed)
+                return false;
+            this._tsPlay(steps.concat(typed));
+        }
+        if (this._typed !== null && this._typed.endsWith(oldTail))
+            this._trkSet(this._typed.slice(0, this._typed.length - oldTail.length) + newText);
+        else
+            this._trkUnknown();
+        return true;
+    }
+
+    _tryRevertCorrection() {
+        const lc = this._lastCorrection;
+        this._lastCorrection = null;
+        // Only when Backspace is the very next key after the correction
+        if (!lc || lc.seq !== this._keySeq - 1)
+            return false;
+        const seq = this._keySeq;
+        this._replaceTail(lc.fix + lc.term, lc.orig, true, seq).then(ok => {
+            if (!ok) {
+                // Could not verify the text: behave like a normal Backspace
+                if (seq === this._keySeq) {
+                    this._input.tapKey(14);
+                    this._trkBackspace();
+                }
+                return;
+            }
+            // Don't correct this word again
+            const low = lc.orig.toLowerCase();
+            this._tsLearned[low] = Math.max(this._tsLearned[low] || 0, 3);
+            this._tsLearnedDirty = true;
+            this._tsScheduleSave();
+            this._acUpdate();
+        });
+        return true;
+    }
+
+    // ------------------------------------------------------------------
+    // Auto-capitalization: Shift turns on by itself at the start of a sentence and only
+    // affects letters. Tapping Shift turns it off until the next key.
+    // ------------------------------------------------------------------
+    _acUpdate(force = false) {
+        // Called after every key: the tracked text is final now, so update predictions
+        if (this._nwReady)
+            this._tsRefresh();
+        // Never change Shift while a key is held with it (the key release takes care of it)
+        if (!this.isOpen || this._destroyed || this._activeGesture === 'longpress' || this._shiftSent)
+            return;
+        let want = false;
+        try {
+            const im = Main.inputMethod;
+            const H = Clutter.InputContentHintFlags;
+            const hints = im.contentHints ?? im.content_hints ?? 0;
+            const enabled = this._settings.get_boolean('auto-capitalize') &&
+                !this.capsActive && this._acSuppressSeq !== this._keySeq &&
+                !(hints & (H.LOWERCASE ?? 0)) && this._fieldTypeAllowed() && !im.hasPreedit?.() &&
+                !this._focusInShell(); // searches and commands don't start sentences
+            if (enabled) {
+                let d = null;
+                // The keyboard's own record is fresher than the app's report, as long as it
+                // contains something other than spaces
+                if (this._typed !== null && this._typed.trim().length > 0)
+                    d = TL.wantsCapital(this._typed);
+                if (d === null)
+                    d = TL.wantsCapital(this._surroundingBefore());
+                want = d === true;
+            }
+        } catch (e) {
+            want = false;
+        }
+        if (want && !this.shiftActive) {
+            this.shiftActive = true;
+            this._autoShift = true;
+            this._activeShiftCode = 42;
+        } else if (!want && this.shiftActive && this._autoShift) {
+            this.shiftActive = false;
+            this._autoShift = false;
+        } else if (!force) {
+            return;
+        }
+        this._updateModifierUI();
+        this._updateLabels();
+    }
+
+    // ------------------------------------------------------------------
+    // Theme
+    // ------------------------------------------------------------------
+    _isMaterial() {
+        try {
+            return this._settings.get_string('theme') === 'material';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    _isLight() {
+        try {
+            if (!this._ifaceSettings)
+                this._ifaceSettings = new Gio.Settings({ schema_id: 'org.gnome.desktop.interface' });
+            return this._ifaceSettings.get_string('color-scheme') !== 'prefer-dark';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    _themeClasses() {
+        if (!this._isMaterial())
+            return [];
+        return ['apropos-osk-theme-material', this._isLight() ? 'apropos-osk-light' : 'apropos-osk-dark'];
+    }
+
+    _applyTheme() {
+        if (!this.actor)
+            return;
+        for (const c of ['apropos-osk-theme-material', 'apropos-osk-light', 'apropos-osk-dark'])
+            this.actor.remove_style_class_name(c);
+        for (const c of this._themeClasses())
+            this.actor.add_style_class_name(c);
+        this._tsStyleBar();
+        if (this._isoEnter && this._isoEnter._redraw)
+            this._isoEnter._redraw();
     }
 
     _computeFontFamily() {
@@ -2771,6 +4089,11 @@ export class AproposKeyboard {
         const text = btn.label || '';
         const n = Array.from(text).length;
         let base;
+        if (def.split) {
+            // Two stacked symbols: both lines must fit the key height
+            const kh = btn._keyH || 50;
+            return Math.max(11, Math.min(this._fitFont('▲', 18, btn._keyW || 64, kh), Math.floor(kh * 0.36)));
+        }
         if (def.type === 'arrow') base = 20;
         else if (n <= 1) base = 24;
         else if (n <= 3) base = 20;
@@ -2792,7 +4115,7 @@ export class AproposKeyboard {
         const marginRight = (btn._baseMarginRight !== undefined) ? btn._baseMarginRight : 4;
 
         // Segnaposto trasparente
-        if (btn._isEnterPlaceholder) {
+        if (btn._isEnterPlaceholder || btn._isSpacer) {
             btn.set_style(`margin-right: ${marginRight}px; background-color: transparent !important; border: none !important; box-shadow: none !important;`);
             return;
         }
@@ -2800,6 +4123,27 @@ export class AproposKeyboard {
         const radius = btn._baseRadius || 8;
         const family = this._fontFamilyCss || this._computeFontFamily();
         const fontSize = this._fontSizeFor(btn);
+
+        // Split key: transparent outer button, two separately drawn halves
+        if (btn._splitHalves) {
+            const kh = btn._keyH || 50;
+            const gap = Math.max(2, Math.round(kh * 0.07));
+            const halfH = Math.floor((kh - gap) / 2);
+            const r = Math.min(radius, Math.floor(halfH / 2));
+            btn.set_style(`margin-right: ${marginRight}px; padding: 0; background-color: transparent !important; border: none !important; box-shadow: none !important;`);
+            btn._splitBox.set_style(`spacing: ${gap}px;`);
+            const fs = Math.max(9, Math.min(Math.floor(halfH * 0.5), 16));
+            const down = isPressed && btn._splitDef ? btn._splitDef.code : null;
+            for (const half of btn._splitHalves) {
+                half.set_height(halfH);
+                half.set_style(`border-radius: ${r}px; margin: 0; font-family: "${family}"; font-size: ${fs}px;`);
+                if (half._code === down)
+                    half.add_style_class_name('pressed');
+                else
+                    half.remove_style_class_name('pressed');
+            }
+            return;
+        }
 
         let s = `border-radius: ${radius}px; margin-right: ${marginRight}px; font-family: "${family}"; font-size: ${fontSize}px; font-weight: normal;`;
 
@@ -2914,6 +4258,23 @@ export class AproposKeyboard {
         });
         this._settingsSignals.push(layoutId);
 
+        // Theme, and the system light/dark style for the Material theme
+        this._settingsSignals.push(this._settings.connect('changed::theme', () => {
+            this._applyTheme();
+            this._applyGeometry();
+        }));
+        try {
+            this._ifaceSettings = new Gio.Settings({ schema_id: 'org.gnome.desktop.interface' });
+            this._colorSchemeId = this._ifaceSettings.connect('changed::color-scheme', () => this._applyTheme());
+        } catch (e) {}
+
+        // Long-press on/off shows or hides the corner symbols
+        this._settingsSignals.push(this._settings.connect('changed::long-press', () => this._applyGeometry()));
+        this._settingsSignals.push(this._settings.connect('changed::autocorrect', () => {
+            if (this.isOpen)
+                this._acPrepare();
+        }));
+
         this._monitorsChangedId = Main.layoutManager.connect('monitors-changed', () => {
             if (this.isOpen)
                 this._applyGeometry();
@@ -2935,12 +4296,22 @@ export class AproposKeyboard {
         this._updateStruts();
         this._settings.set_boolean('keyboard-visible', true);
         this._extension.updateToggleState(true);
+
+        // Typing assistance: nothing is known about the text yet; ask the app for it
+        this._trkUnknown();
+        this._acPrepare();
+        this._acUpdate();
+        try {
+            if (Main.inputMethod.currentFocus)
+                Main.inputMethod.request_surrounding();
+        } catch (e) {}
     }
 
     close() {
         this._resetGestureStates();
         this._stopKeyRepeat();
         this._input.releaseAll();
+        this._superLpCancel();
         this._superDown = false;
         this._superSent = false;
         this._enterDelegate = null;
@@ -2956,11 +4327,15 @@ export class AproposKeyboard {
             this._input.releaseKey(this._activeShiftCode || 42);
             this.shiftActive = false;
         }
+        this._autoShift = false;
+        this._shiftSent = false;
         if (this.altActive) {
             this._input.releaseKey(56);
             this.altActive = false;
         }
+        this._trkUnknown();
         this._updateModifierUI();
+        this._updateLabels();
         this._tsOnClose();
         this.isOpen = false;
         this.actor.hide();
@@ -2994,9 +4369,32 @@ export class AproposKeyboard {
         for (const id of this._oneShotIds ?? [])
             GLib.source_remove(id);
         this._oneShotIds?.clear();
+        for (const finish of [...this._waiters])
+            finish();
+        this._waiters.clear();
+        if (this._freqId) {
+            GLib.source_remove(this._freqId);
+            this._freqId = 0;
+        }
+        if (this._spell) {
+            this._spell.destroy();
+            this._spell = null;
+        }
+        this._freq = null;
+        if (this._surroundingId) {
+            Main.inputMethod.disconnect(this._surroundingId);
+            this._surroundingId = 0;
+        }
+        if (this._colorSchemeId && this._ifaceSettings) {
+            this._ifaceSettings.disconnect(this._colorSchemeId);
+            this._colorSchemeId = 0;
+        }
+        this._ifaceSettings = null;
+        this._tsPlayQueue = [];
         this._tsDestroy();
         this._cleanupStageGesture();
         this._stopKeyRepeat();
+        this._superLpCancel();
         if (this._superFallbackId) {
             GLib.source_remove(this._superFallbackId);
             this._superFallbackId = 0;

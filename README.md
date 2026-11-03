@@ -51,7 +51,8 @@ cd apropos-osk && ./pack.sh
 gnome-extensions install --force dist/apropos-osk@besho-sho.shell-extension.zip
 ```
 
-**Requirements:** GNOME Shell 50. Optional: `ibus-typing-booster` for better word suggestions,
+**Requirements:** GNOME Shell 50. Autocorrect uses `enchant-2` and a Hunspell English dictionary (both installed by default on
+Fedora Workstation). Optional: `ibus-typing-booster` for better word suggestions,
 and the *Atkinson Hyperlegible Next* font for the default key labels. If that font is missing, the system font is used.
 
 ## Features
@@ -59,7 +60,8 @@ and the *Atkinson Hyperlegible Next* font for the default key labels. If that fo
 ### Layout and keys
 * **TKL layout:** Esc, a combined number/Fn row (F1 to F12), arrows, and all modifiers: Shift, Ctrl, Alt, AltGr, Super and Fn.
   Combinations such as `Ctrl+Alt+Del` and `Super+key` work.
-* **Built-in layouts:** Italian (ISO, with the tall Enter key) and US (ANSI).
+* **Built-in layouts:** Italian (ISO, with the tall Enter key), US (ANSI), and **Tablet (US, Gboard style)**: a touch layout
+  with a number row, laid out like a tablet keyboard: `Backspace` ends the top letter row and `Enter` the home row (a row apart, so they are hard to mix up), `Shift` on both sides with `,` `.` beside `m`, and `Ctrl` `❖` `Space` `▲` `▼` at the bottom (slide on Space for Left/Right). Tap `❖` for Super, long-press it for a sticky `Alt` (long-press again to release). Long-press `▲`/`▼` for Page Up/Down, or Shift+Page Up/Down to scroll a terminal's history.
 * **Modifier behavior:** each key can work as a normal key (hold) or as an on/off switch (latch).
 * **Modified-key highlight:** while Shift, AltGr or Fn is active, the keys that change symbol are colored. The colors can be changed.
 * **Super key:** a tap opens the Activities overview, and holding it with another key sends the combination.
@@ -77,11 +79,23 @@ The sensitivity of both gestures can be set in pixels per character.
 ### Smart typing
 * **Word suggestions:** a suggestion bar above the keys with three completions, the best one in the middle.
   The keyboard learns new words as you type. Learned words stay on your computer, in `~/.config/apropos-osk/`.
+* **Next-word prediction:** after a space, or at the start of a sentence, the bar offers the likely next word. It learns the word pairs you type (stored only in `~/.config/apropos-osk/learned-pairs.json`), also uses the pairs Typing Booster has learned, and starts from a small built-in list.
 * **Typing Booster mode:** suggestions can come from `ibus-typing-booster` instead, which sees the real text and shows six candidates.
   While the keyboard is open the input method switches to Typing Booster, and it switches back when the keyboard closes.
   It is not used in URL, e-mail, password, PIN, number or terminal fields, so browser address-bar completion keeps working.
   If Typing Booster is not installed, the built-in list is used.
 * **Privacy:** nothing you type is logged. Password and PIN fields are never recorded and never show suggestions.
+* **Long-press for accents and symbols (Tablet layout):** hold a key, slide to a character and let go. Each key shows its symbol
+  in the corner (`q` → `%`, `a` → `@`, `.` → `?` …), followed by the accented letters from GNOME's own keyboard data (`e` → `è é ê ë ē`).
+  Double-tap Shift for Caps Lock.
+* **Auto-capitalization:** Shift turns on by itself at the start of a sentence and in an empty field. It only affects letters,
+  so Enter stays Enter and digits stay digits. Tap Shift to type a small letter instead.
+* **Double-space period:** tapping space twice after a word types `. `.
+* **Autocorrect (English):** misspelled words are fixed when you type a space or punctuation (`teh` → `the`, `dont` → `don't`, `i` → `I`).
+  The system spell checker (Enchant with Hunspell dictionaries) decides what is misspelled; a word-frequency list picks the
+  most likely fix, and only fixes the spell checker accepts are used. Nothing is changed when the fix is unclear.
+  Press Backspace right after a correction to undo it; that word is then never corrected again.
+  Not used in password, PIN, terminal, URL, e-mail or number fields, and off when the system language is not English.
 * **Auto-pairing:** `()`, `[]`, `{}` and quotes are closed automatically with the cursor in between. Typing the closing character
   out of habit steps over it instead of adding a second one.
 
@@ -102,7 +116,8 @@ The sensitivity of both gestures can be set in pixels per character.
 * Header buttons to switch layout and mode, open the settings, and close the keyboard.
 
 ### Appearance
-* Windows 11 style keys with adjustable corner radius.
+* Two key styles: **Fluent** (Windows 11 look) and **Material** (flat phone look that follows the system light/dark style).
+* Adjustable corner radius.
 * Separate horizontal and vertical key gaps, an extra gap below the number row, and padding from the bottom edge.
 * Font: *Atkinson Hyperlegible Next* by default, or any installed font picked from a font chooser, with a text size setting.
   Labels shrink only when they do not fit in the key.
@@ -137,6 +152,16 @@ GNOME Shell release is supported. Help with reviewing and maintaining the code i
 
 * [**TbangIT**](https://github.com/TbangIT): author of [Fluent OSK](https://github.com/TbangIT/fluent-osk) (`fluent-osk@tbang`), the extension this project is based on.
 * [**BeShO-ShO**](https://github.com/BeShO-ShO): Apropos OSK modifications and maintenance.
+* `words-freq-en.txt` is derived from [FrequencyWords](https://github.com/hermitdave/FrequencyWords) by Hermit Dave
+  (OpenSubtitles 2018 word counts), licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+  Changes: lowercased, offensive words removed using the
+  [LDNOOBW list](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words) (CC BY 4.0), split contractions
+  rebuilt, top 40,000 words kept. The derived list is also available under CC BY-SA 4.0.
+* `next-words-en.txt` (next-word prediction) holds word pairs counted from the English sentences of
+  [Tatoeba](https://tatoeba.org), licensed [CC BY 2.0 FR](https://creativecommons.org/licenses/by/2.0/fr/).
+  Changes: only the 1,500 most common previous words and their 6 most common next words kept, limited to the
+  `words-freq-en.txt` vocabulary (so offensive words stay out), names dropped, a few entries hand-picked.
+* Long-press accents are read at runtime from GNOME Shell's own on-screen keyboard layouts (GPL-2.0-or-later); nothing is copied.
 
 ## License
 

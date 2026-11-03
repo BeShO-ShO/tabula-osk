@@ -76,6 +76,45 @@ export class VirtualInput {
         }
     }
 
+    // Modifier combo (e.g. Shift+PgUp) with small gaps between the steps, so the app
+    // sees Shift held down before the key and still held when it is released.
+    tapCombo(mods, code) {
+        if (!this._device || code <= 0) return;
+        const steps = [
+            ...mods.map(m => () => this.pressKey(m)),
+            () => this.pressKey(code),
+            () => this.releaseKey(code),
+            ...mods.slice().reverse().map(m => () => this.releaseKey(m)),
+        ];
+        steps.shift()();
+        const id = GLib.timeout_add(GLib.PRIORITY_HIGH, 15, () => {
+            if (!this._device || !steps.length) {
+                this._tapIds.delete(id);
+                return GLib.SOURCE_REMOVE;
+            }
+            steps.shift()();
+            if (steps.length)
+                return GLib.SOURCE_CONTINUE;
+            this._tapIds.delete(id);
+            return GLib.SOURCE_REMOVE;
+        });
+        this._tapIds.add(id);
+    }
+
+    // Type a character that has no key on the current layout: the compositor maps the
+    // keyval to a keycode (adding a temporary mapping when needed).
+    tapKeyval(keyval) {
+        if (!this._device || !keyval) return;
+        try {
+            this.markActive();
+            const time = this._getTime();
+            this._device.notify_keyval(time, keyval, Clutter.KeyState.PRESSED);
+            this._device.notify_keyval(time, keyval, Clutter.KeyState.RELEASED);
+        } catch (e) {
+            console.error(`[AproposOSK] Failed to type keyval ${keyval}:`, e);
+        }
+    }
+
     releaseAll() {
         if (!this._device) return;
         const time = this._getTime();

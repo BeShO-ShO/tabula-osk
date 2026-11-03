@@ -126,5 +126,33 @@
       <default>false</default>
       <summary>Feed the suggestion bar from ibus-typing-booster instead of the built-in word list</summary>
     </key>
+    <key name="theme" type="s">
+      <choices>
+        <choice value="fluent"/>
+        <choice value="material"/>
+      </choices>
+      <default>"fluent"</default>
+      <summary>Key style: "fluent" (Windows 11 look) or "material" (phone look that follows the system light/dark style)</summary>
+    </key>
+    <key name="long-press" type="b">
+      <default>true</default>
+      <summary>Hold a key for accents and symbols (on layouts that support it)</summary>
+    </key>
+    <key name="long-press-delay" type="i">
+      <default>350</default>
+      <summary>How long a key must be held before the long-press popup opens (ms)</summary>
+    </key>
+    <key name="auto-capitalize" type="b">
+      <default>true</default>
+      <summary>Start sentences with a capital letter</summary>
+    </key>
+    <key name="double-space-period" type="b">
+      <default>true</default>
+      <summary>Double-tapping space types a period and a space</summary>
+    </key>
+    <key name="autocorrect" type="b">
+      <default>true</default>
+      <summary>Fix misspelled English words when space or punctuation is typed</summary>
+    </key>
   </schema>
 </schemalist>
