@@ -268,6 +268,10 @@
     font-weight: normal;
 }
 
+.apropos-osk-hint.apropos-osk-hint-accent {
+    color: rgba(255, 255, 255, 0.75);
+}
+
 .apropos-osk-lp-popup {
     background-color: #2d2d33;
     border: 1px solid rgba(255, 255, 255, 0.22);
@@ -394,6 +398,10 @@
     color: rgba(227, 227, 227, 0.6);
 }
 
+.apropos-osk-theme-material .apropos-osk-hint.apropos-osk-hint-accent {
+    color: rgba(6, 46, 111, 0.7);
+}
+
 .apropos-osk-lp-popup.apropos-osk-theme-material {
     background-color: #33333a;
     border: none;
@@ -489,6 +497,10 @@
 
 .apropos-osk-theme-material.apropos-osk-light .apropos-osk-hint {
     color: rgba(31, 31, 31, 0.55);
+}
+
+.apropos-osk-theme-material.apropos-osk-light .apropos-osk-hint.apropos-osk-hint-accent {
+    color: rgba(255, 255, 255, 0.75);
 }
 
 .apropos-osk-lp-popup.apropos-osk-theme-material.apropos-osk-light {

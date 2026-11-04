@@ -396,7 +396,7 @@ export class AproposKeyboard {
         this.actor = new St.BoxLayout({
             name: 'apropos-osk',
             style_class: 'apropos-osk-container',
-            vertical: true,
+            orientation: Clutter.Orientation.VERTICAL,
             reactive: true,
             track_hover: true,
             can_focus: false,
@@ -437,7 +437,7 @@ export class AproposKeyboard {
             y_expand: false,
         });
         this._headerRow = new St.BoxLayout({
-            vertical: false,
+            orientation: Clutter.Orientation.HORIZONTAL,
             x_expand: true,
             y_expand: true,
         });
@@ -476,7 +476,7 @@ export class AproposKeyboard {
 
         // Pulsanti intestazione destra
         const rightBtns = new St.BoxLayout({
-            vertical: false,
+            orientation: Clutter.Orientation.HORIZONTAL,
             x_align: Clutter.ActorAlign.END,
             y_align: Clutter.ActorAlign.CENTER,
         });
@@ -652,7 +652,7 @@ export class AproposKeyboard {
             y_expand: false,
         });
         this._rowsBox = new St.BoxLayout({
-            vertical: true,
+            orientation: Clutter.Orientation.VERTICAL,
             x_expand: true,
             y_expand: false,
         });
@@ -699,7 +699,7 @@ export class AproposKeyboard {
         rowSpecs.forEach((spec, r) => {
             const rowBox = new St.BoxLayout({
                 style_class: spec.isNumber ? 'apropos-osk-row apropos-osk-number-row' : 'apropos-osk-row',
-                vertical: false,
+                orientation: Clutter.Orientation.HORIZONTAL,
                 x_expand: true,
                 y_expand: false,
             });
@@ -1034,6 +1034,12 @@ export class AproposKeyboard {
             btn._longpress = keyDef.lpKeys.map(k => k.label);
             btn._lpCodes = new Map(keyDef.lpKeys.map(k => [k.label, k.code]));
             btn._lpShift = new Set(keyDef.lpKeys.filter(k => k.shift).map(k => k.label));
+            // Entry highlighted when the popup opens (index into lpKeys, default the first)
+            btn._lpDefault = Number.isInteger(keyDef.lpDefault) ? keyDef.lpDefault : 0;
+            if (keyDef.hint)
+                this._addHint(btn, keyDef.hint);
+            if (keyDef.hintLeft)
+                this._addHint(btn, keyDef.hintLeft, true);
             return;
         }
         if (keyDef.type)
@@ -1052,15 +1058,21 @@ export class AproposKeyboard {
             this._addHint(btn, keyDef.hint);
     }
 
-    _addHint(btn, text) {
+    _addHint(btn, text, left = false) {
         const hint = new St.Label({
             text,
             style_class: 'apropos-osk-hint',
             reactive: false,
         });
         hint._btn = btn;
+        // Hints on the accent-coloured Enter key take the key's text colour
+        if (btn._keyDef?.type === 'enter')
+            hint.add_style_class_name('apropos-osk-hint-accent');
         this._overlay.add_child(hint);
-        btn._hintActor = hint;
+        if (left)
+            btn._hintLeftActor = hint;
+        else
+            btn._hintActor = hint;
         this._hintActors.push(hint);
     }
 
@@ -1125,7 +1137,7 @@ export class AproposKeyboard {
 
         const popup = new St.BoxLayout({
             style_class: 'apropos-osk-lp-popup',
-            vertical: false,
+            orientation: Clutter.Orientation.HORIZONTAL,
             reactive: false,
         });
         for (const cls of this._themeClasses())
@@ -1165,8 +1177,10 @@ export class AproposKeyboard {
         lp.x0 = x + pad;
         lp.cellW = cellW;
         lp.cancelY = ky + kh * 1.6;
-        // Without a hint symbol the first entry is an accent: start on it as Gboard does
-        this._lpSelect(0);
+        // Without a hint symbol the first entry is an accent: start on it as Gboard does.
+        // Keys may name another entry as the default (e.g. ▼ starts on PgDn).
+        lp.def = Math.max(0, Math.min(n - 1, btn._lpDefault ?? 0));
+        this._lpSelect(lp.def);
     }
 
     _lpSelect(idx) {
@@ -1189,6 +1203,12 @@ export class AproposKeyboard {
         const [x, y] = event.get_coords();
         if (y > lp.cancelY) {
             this._lpSelect(-1);
+            return;
+        }
+        // A non-first default stays chosen until the finger really slides sideways
+        if (lp.def && lp.px !== undefined && Math.abs(x - lp.px) < lp.cellW / 2) {
+            if (lp.sel !== lp.def)
+                this._lpSelect(lp.def);
             return;
         }
         const n = lp.cells.length;
@@ -1266,7 +1286,7 @@ export class AproposKeyboard {
         // Split key: one button (one hit area) drawn as two small stacked keys.
         if (keyDef.split) {
             btn.add_style_class_name('apropos-osk-split');
-            const box = new St.BoxLayout({ vertical: true, x_expand: true, y_expand: true });
+            const box = new St.BoxLayout({ orientation: Clutter.Orientation.VERTICAL, x_expand: true, y_expand: true });
             btn._splitHalves = Array.from(keyDef.label.split('\n')).map((t, i) => {
                 const lbl = new St.Label({ text: t, x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER, x_expand: true, y_expand: true });
                 const half = new St.Bin({
@@ -1639,7 +1659,7 @@ export class AproposKeyboard {
         const [x, y] = event.get_coords();
         if (type === 'longpress') {
             const delay = Math.max(150, this._settings.get_int('long-press-delay') || 350);
-            const lp = { btn, keyDef: btn._keyDef, popup: null, sel: -1, timer: 0, delay, t0: this._eventTime(event) };
+            const lp = { btn, keyDef: btn._keyDef, popup: null, sel: -1, timer: 0, delay, t0: this._eventTime(event), px: x };
             lp.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
                 lp.timer = 0;
                 if (this._lp === lp)
@@ -2638,6 +2658,17 @@ export class AproposKeyboard {
                         hint.set_position(row.xs[i] + kw - hw - Math.round(kw * 0.08), row.top + 2);
                         hint.set_style(`font-family: "${this._fontFamilyCss || this._computeFontFamily()}"; font-size: ${hfs}px; text-align: right;`);
                     }
+                    // Second long-press hint in the top-left corner (e.g. Esc on Enter)
+                    if (btn._hintLeftActor) {
+                        const hint = btn._hintLeftActor;
+                        const hw = Math.round(kw * 0.45);
+                        const hh = Math.round(keyHeight * 0.42);
+                        const hfs = Math.max(9, Math.round(keyHeight * 0.22));
+                        hint.visible = this._longPressOn();
+                        hint.set_size(hw, hh);
+                        hint.set_position(row.xs[i] + Math.round(kw * 0.08), row.top + 2);
+                        hint.set_style(`font-family: "${this._fontFamilyCss || this._computeFontFamily()}"; font-size: ${hfs}px; text-align: left;`);
+                    }
                 }
             }
 
@@ -2809,7 +2840,7 @@ export class AproposKeyboard {
     _tsBuildBarWidgets() {
         this._suggestBar = new St.BoxLayout({
             style_class: 'apropos-osk-suggest-bar',
-            vertical: false,
+            orientation: Clutter.Orientation.HORIZONTAL,
             x_expand: true,
             y_expand: false,
         });
@@ -3226,6 +3257,47 @@ export class AproposKeyboard {
         this._nwReady = true;
     }
 
+    // Typing Booster finishes a tapped word asynchronously: the commit and the cleared
+    // preedit arrive after the tap, often after the bar was refreshed (which then found
+    // a preedit and showed nothing). Refresh again whenever the input context reports it.
+    _nwHookIm() {
+        const ctx = Main.inputMethod?._context ?? null;
+        if (ctx === this._nwImCtx)
+            return;
+        this._nwUnhookIm();
+        if (!ctx)
+            return;
+        this._nwImIds = [];
+        for (const sig of ['commit-text', 'hide-preedit-text', 'update-preedit-text-with-mode']) {
+            const cb = () => this._nwQueueRefresh();
+            try {
+                this._nwImIds.push(ctx.connect(sig, cb));
+            } catch (e) {}
+        }
+        this._nwImCtx = ctx;
+    }
+
+    _nwUnhookIm() {
+        for (const id of this._nwImIds ?? []) {
+            try {
+                this._nwImCtx.disconnect(id);
+            } catch (e) {}
+        }
+        this._nwImIds = [];
+        this._nwImCtx = null;
+    }
+
+    _nwQueueRefresh() {
+        if (this._nwRefreshId || this._destroyed)
+            return;
+        this._nwRefreshId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            this._nwRefreshId = 0;
+            if (!this._destroyed && this.isOpen)
+                this._tsRefresh();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
     _nwPath() {
         return GLib.build_filenamev([GLib.get_user_config_dir(), 'apropos-osk', 'learned-pairs.json']);
     }
@@ -3400,6 +3472,9 @@ export class AproposKeyboard {
 
     // A Typing Booster candidate replaces the word being typed (plus a space by default)
     _nwOnTbCandidate(text) {
+        // The engine's labels carry invisible direction marks (U+202A…U+202C) that are not
+        // part of the committed text; keeping them would hide the word from predictions
+        text = String(text ?? '').replace(/\p{Cf}/gu, '');
         const t = this._typed;
         if (t === null || !text) {
             this._trkUnknown();
@@ -3472,6 +3547,7 @@ export class AproposKeyboard {
         if (!this._suggestBtns)
             return;
         if (this._tbOn()) {
+            this._nwHookIm();
             // Candidates from typing-booster; best one goes to the centre slot (rank 0)
             let c = [];
             if (this._tsEnabled() && this._tsFieldAllowed())
@@ -4391,6 +4467,11 @@ export class AproposKeyboard {
         }
         this._ifaceSettings = null;
         this._tsPlayQueue = [];
+        if (this._nwRefreshId) {
+            GLib.source_remove(this._nwRefreshId);
+            this._nwRefreshId = 0;
+        }
+        this._nwUnhookIm();
         this._tsDestroy();
         this._cleanupStageGesture();
         this._stopKeyRepeat();

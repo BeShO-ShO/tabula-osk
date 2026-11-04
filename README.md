@@ -1,6 +1,6 @@
 # Apropos OSK
 
-![GNOME Shell](https://img.shields.io/badge/GNOME_Shell-50-blue)
+![GNOME Shell](https://img.shields.io/badge/GNOME_Shell-50_|_51-blue)
 ![License](https://img.shields.io/badge/License-GPLv3-green)
 
 *The opportune on-screen keyboard for GNOME. Built to be the absolute right fit for touch devices.*
@@ -63,7 +63,7 @@ cd apropos-osk && ./pack.sh
 gnome-extensions install --force dist/apropos-osk@besho-sho.shell-extension.zip
 ```
 
-**Requirements:** GNOME Shell 50. Autocorrect uses `enchant-2` and a Hunspell English dictionary (both installed by default on
+**Requirements:** GNOME Shell 50 or 51. Autocorrect uses `enchant-2` and a Hunspell English dictionary (both installed by default on
 Fedora Workstation). Optional: `ibus-typing-booster` for better word suggestions,
 and the *Atkinson Hyperlegible Next* font for the default key labels. If that font is missing, the system font is used.
 
@@ -171,7 +171,7 @@ GNOME Shell release is supported. Help with reviewing and maintaining the code i
   rebuilt, top 40,000 words kept. The derived list is also available under CC BY-SA 4.0.
 * `next-words-en.txt` (next-word prediction) holds word pairs counted from the English sentences of
   [Tatoeba](https://tatoeba.org), licensed [CC BY 2.0 FR](https://creativecommons.org/licenses/by/2.0/fr/).
-  Changes: only the 1,500 most common previous words and their 6 most common next words kept, limited to the
+  Changes: only the 3,000 most common previous words and their 6 most common next words kept, limited to the
   `words-freq-en.txt` vocabulary (so offensive words stay out), names dropped, a few entries hand-picked.
 * Long-press accents are read at runtime from GNOME Shell's own on-screen keyboard layouts (GPL-2.0-or-later); nothing is copied.
 

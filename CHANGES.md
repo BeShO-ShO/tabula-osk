@@ -1,5 +1,17 @@
 # Changes
 
+## 1.1.1 (2026-11-04)
+- **GNOME Shell 51** support (Fedora 45): uses `global.stage.context.get_backend()` instead of the removed
+  `Clutter.get_default_backend()`, and `orientation` instead of `St.BoxLayout`'s `vertical` property.
+- **Next-word prediction fixed after completing a word from Typing Booster's suggestions**: the engine wraps each suggestion
+  label in invisible direction marks (U+202A…U+202C) that are not part of the committed text; the keyboard kept them in its
+  record of the typed text, so the word was not recognised and no next word appeared (and the pair was not learned).
+  The bar also refreshes when the engine finishes the word (commit / preedit cleared), not just right after the tap.
+- Bundled next-word list doubled to **3,000 words** (`next-words-en.txt`, ~100 KB).
+- Tablet layout: corner hints for long-press keys (↵ shows Tab / Esc, ▲ PgUp, ▼ PgDn; readable on the blue Enter key).
+  Long-press ▼ now starts on **PgDn** (popup order unchanged: ⇧PgDn, PgDn); new `lpDefault` key property picks the entry
+  highlighted when the popup opens, which stays chosen until the finger slides sideways.
+
 ## 1.1.0 (2026-11-03)
 - New layout **Tablet (US, Gboard style)** (setting value `phone`): number row; tablet arrangement with Backspace at the end of
   the q row and a wide Enter at the end of the home row (a row apart), Shift on both sides with `,` `.` beside `m`,

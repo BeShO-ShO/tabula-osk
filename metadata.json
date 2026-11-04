@@ -9,7 +9,8 @@
     "unlock-dialog"
   ],
   "shell-version": [
-    "50"
+    "50",
+    "51"
   ],
-  "version-name": "1.1.0"
+  "version-name": "1.1.1"
 }

@@ -7,7 +7,7 @@ export class VirtualInput {
         this._activeKeys = new Set();
         this._tapIds = new Set();
         try {
-            const backend = Clutter.get_default_backend();
+            const backend = global.stage.context.get_backend();
             if (backend) {
                 const seat = backend.get_default_seat();
                 if (seat) {

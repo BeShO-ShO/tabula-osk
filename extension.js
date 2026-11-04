@@ -249,7 +249,7 @@ export default class AproposOskExtension extends Extension {
         if (this._lastDeviceIsTouch !== undefined)
             return this._lastDeviceIsTouch;
         try {
-            return !!Clutter.get_default_backend().get_default_seat().touch_mode;
+            return !!global.stage.context.get_backend().get_default_seat().touch_mode;
         } catch (err) {
             return true;
         }

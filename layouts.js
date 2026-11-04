@@ -205,7 +205,7 @@ Layouts.phone = {
             L(30, 'a', '@'), L(31, 's', '#'), L(32, 'd', '&'), L(33, 'f', '*'), L(34, 'g', '-'),
             L(35, 'h', '+'), L(36, 'j', '='), L(37, 'k', '('), L(38, 'l', ')'),
             // long-press: keys without a place of their own (terminal use)
-            { code: 28, label: "↵", width: 2.0, type: "enter", lpKeys: [{ label: "Tab", code: 15 }, { label: "Esc", code: 1 }] },
+            { code: 28, label: "↵", width: 2.0, type: "enter", hintLeft: "Tab", hint: "Esc", lpKeys: [{ label: "Tab", code: 15 }, { label: "Esc", code: 1 }] },
         ],
         [
             { code: 42, label: "⇧", width: 1.25, type: "shift" },
@@ -222,8 +222,8 @@ Layouts.phone = {
             { code: 125, label: "❖", width: 1.25, type: "super", lpAlt: true, hint: "Alt" },
             // Left/Right: slide on the space bar
             { code: 57, label: " ", width: 6.5, type: "space" },
-            { code: 103, label: "▲", width: 1.25, type: "arrow", lpKeys: [{ label: "PgUp", code: 104 }, { label: "⇧PgUp", code: 104, shift: true }] },
-            { code: 108, label: "▼", width: 1.25, type: "arrow", lpKeys: [{ label: "PgDn", code: 109 }, { label: "⇧PgDn", code: 109, shift: true }] },
+            { code: 103, label: "▲", width: 1.25, type: "arrow", hint: "PgUp", lpKeys: [{ label: "PgUp", code: 104 }, { label: "⇧PgUp", code: 104, shift: true }] },
+            { code: 108, label: "▼", width: 1.25, type: "arrow", hint: "PgDn", lpKeys: [{ label: "⇧PgDn", code: 109, shift: true }, { label: "PgDn", code: 109 }], lpDefault: 1 },
         ],
     ],
 };
