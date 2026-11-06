@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## 1.2.0 (2026-11-06)
 - **Renamed to Tabula OSK** (was Apropos OSK, which also clashed with the `apropos` command). New extension ID
   `tabula-osk@besho-sho`, settings schema `org.gnome.shell.extensions.tabula-osk`, config folder `~/.config/tabula-osk/`,
   repository `BeShO-ShO/tabula-osk`. On its first start Tabula OSK copies the settings (dconf
