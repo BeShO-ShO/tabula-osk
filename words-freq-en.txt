@@ -1,4 +1,4 @@
-# English word frequencies for Apropos OSK autocorrect and suggestions.
+# English word frequencies for Tabula OSK autocorrect and suggestions.
 # Derived from FrequencyWords (OpenSubtitles 2018) by Hermit Dave,
 # https://github.com/hermitdave/FrequencyWords - content licensed CC BY-SA 4.0.
 # Changes: lowercased, offensive words removed, split contractions rebuilt, top 40000 kept.

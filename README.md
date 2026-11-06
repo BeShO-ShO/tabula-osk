@@ -1,27 +1,29 @@
-# Apropos OSK
+# Tabula OSK
 
 ![GNOME Shell](https://img.shields.io/badge/GNOME_Shell-50_|_51-blue)
 ![License](https://img.shields.io/badge/License-GPLv3-green)
 
-*The opportune on-screen keyboard for GNOME. Built to be the absolute right fit for touch devices.*
+*Tabula: Latin for a writing tablet. An on-screen keyboard for GNOME, built for touch devices.*
 
 ## The Problem
 If you have ever used a modern Linux touch device running GNOME, you know the frustration: there is a severe lack of on-screen keyboard (OSK) extensions that work reliably, fluidly, and intuitively with touch gestures. The default options often feel clunky, sluggish, or poorly integrated into a modern mobile-first workflow.
 
 ## The Solution
-Apropos OSK is an on-screen keyboard for GNOME Shell, made for touchscreen laptops and tablets and inspired by the Windows 11 touch keyboard.
+Tabula OSK is an on-screen keyboard for GNOME Shell, made for touchscreen laptops and tablets and inspired by the Windows 11 touch keyboard.
 It replaces the stock GNOME keyboard. It has a full TKL layout with real modifier keys, opens by itself when you tap a text field, suggests words,
 and lets you move the cursor or select text by dragging on the keys.
 
 Author: [BeShO-ShO](https://github.com/BeShO-ShO). Based on [**Fluent OSK**](https://github.com/TbangIT/fluent-osk) (`fluent-osk@tbang`) by [**TbangIT**](https://github.com/TbangIT). See [Credits](#credits).
 
+Formerly **Apropos OSK** (`apropos-osk@besho-sho`); renamed to Tabula OSK in version 1.2.0.
+
 ## Screenshots
 
 The docked keyboard with word suggestions:
-![Apropos OSK docked at the bottom of the screen, with word suggestions above the keys](screenshots/keyboard.png)
+![Tabula OSK docked at the bottom of the screen, with word suggestions above the keys](screenshots/keyboard.png)
 
 The settings window:
-![Apropos OSK settings window](screenshots/settings.png)
+![Tabula OSK settings window](screenshots/settings.png)
 
 ## Demo
 
@@ -33,34 +35,38 @@ Select and delete text by dragging on Backspace:
 
 ## Installation
 
-Apropos OSK is not on extensions.gnome.org; it is installed from the GitHub releases.
+Tabula OSK is not on extensions.gnome.org; it is installed from the GitHub releases.
 
 **From a GitHub release** (recommended): download and install the latest release:
 ```bash
-curl -LO https://github.com/BeShO-ShO/apropos-osk/releases/latest/download/apropos-osk@besho-sho.shell-extension.zip
-gnome-extensions install --force apropos-osk@besho-sho.shell-extension.zip
+curl -LO https://github.com/BeShO-ShO/tabula-osk/releases/latest/download/tabula-osk@besho-sho.shell-extension.zip
+gnome-extensions install --force tabula-osk@besho-sho.shell-extension.zip
 ```
-(or download the zip by hand from the [Releases](https://github.com/BeShO-ShO/apropos-osk/releases) page).
+(or download the zip by hand from the [Releases](https://github.com/BeShO-ShO/tabula-osk/releases) page).
 Log out and back in (needed on Wayland), then enable it:
 ```bash
-gnome-extensions enable apropos-osk@besho-sho
+gnome-extensions enable tabula-osk@besho-sho
 ```
-Settings: `gnome-extensions prefs apropos-osk@besho-sho`, or the Extensions app.
+Settings: `gnome-extensions prefs tabula-osk@besho-sho`, or the Extensions app.
+
+**Upgrading from Apropos OSK:** install Tabula OSK as above, log out and back in, and enable it. On its first start it
+copies your settings, learned words and custom layout from Apropos OSK and turns the old extension off. Then remove the old
+one with `gnome-extensions uninstall apropos-osk@besho-sho` (its `~/.config/apropos-osk/` folder can be deleted too).
 
 **Updating:** run the same two commands again with the new release, then log out and back in. Your settings and
 learned words are kept.
 
 **Uninstalling:**
 ```bash
-gnome-extensions uninstall apropos-osk@besho-sho
+gnome-extensions uninstall tabula-osk@besho-sho
 ```
-Learned words and a custom layout stay in `~/.config/apropos-osk/`; delete that folder to remove them too.
+Learned words and a custom layout stay in `~/.config/tabula-osk/`; delete that folder to remove them too.
 
 **From source:**
 ```bash
-git clone https://github.com/BeShO-ShO/apropos-osk.git
-cd apropos-osk && ./pack.sh
-gnome-extensions install --force dist/apropos-osk@besho-sho.shell-extension.zip
+git clone https://github.com/BeShO-ShO/tabula-osk.git
+cd tabula-osk && ./pack.sh
+gnome-extensions install --force dist/tabula-osk@besho-sho.shell-extension.zip
 ```
 
 **Requirements:** GNOME Shell 50 or 51. Autocorrect uses `enchant-2` and a Hunspell English dictionary (both installed by default on
@@ -90,8 +96,8 @@ The sensitivity of both gestures can be set in pixels per character.
 
 ### Smart typing
 * **Word suggestions:** shown in the top row of the keyboard, between the layout button and the Cfg/Dock/Width/Close buttons: three completions, the best one in the middle.
-  The keyboard learns new words as you type. Learned words stay on your computer, in `~/.config/apropos-osk/`.
-* **Next-word prediction:** after a space, or at the start of a sentence, the bar offers the likely next word. It learns the word pairs you type (stored only in `~/.config/apropos-osk/learned-pairs.json`), also uses the pairs Typing Booster has learned, and starts from a small built-in list.
+  The keyboard learns new words as you type. Learned words stay on your computer, in `~/.config/tabula-osk/`.
+* **Next-word prediction:** after a space, or at the start of a sentence, the bar offers the likely next word. It learns the word pairs you type (stored only in `~/.config/tabula-osk/learned-pairs.json`), also uses the pairs Typing Booster has learned, and starts from a small built-in list.
 * **Typing Booster mode:** suggestions can come from `ibus-typing-booster` instead, which sees the real text and shows six candidates.
   While the keyboard is open the input method switches to Typing Booster, and it switches back when the keyboard closes.
   It is not used in URL, e-mail, password, PIN, number or terminal fields, so browser address-bar completion keeps working.
@@ -139,12 +145,13 @@ The settings window has a visual editor for a custom layout:
 * An interactive preview. Click a key to edit it.
 * For each key: its label, its Shift, AltGr and Shift+AltGr characters, its width, its Linux keycode, its color, and whether it is a normal key or a switch.
 * Add or remove keys and rows.
-* Changes apply live when saved, with no restart. The custom layout is stored in `~/.config/apropos-osk/`.
+* Start over from the Italian, US or Tablet layout (*Reset to …*). Starting from Tablet keeps its long-press symbols and corner hints.
+* Changes apply live when saved, with no restart. The custom layout is stored in `~/.config/tabula-osk/`.
 
 ## Changes from Fluent OSK
 
-Apropos OSK started from [Fluent OSK](https://github.com/TbangIT/fluent-osk), which already had the TKL layout, the dock, floating and full-width modes, key repeat,
-the Space and Backspace gestures, auto-pairing, the font and spacing settings and the layout editor. Apropos OSK adds:
+Tabula OSK started from [Fluent OSK](https://github.com/TbangIT/fluent-osk), which already had the TKL layout, the dock, floating and full-width modes, key repeat,
+the Space and Backspace gestures, auto-pairing, the font and spacing settings and the layout editor. Tabula OSK adds:
 * automatic showing and hiding on text fields, with the touch-only and hide-on-hardware-key options
 * blocking of the stock GNOME keyboard, and using it on purpose in system dialogs
 * word suggestions with word learning, and the Typing Booster mode
@@ -154,7 +161,7 @@ the Space and Backspace gestures, auto-pairing, the font and spacing settings an
 
 ## Known issues
 
-None known right now. Bug reports and feature requests are welcome in [Issues](https://github.com/BeShO-ShO/apropos-osk/issues),
+None known right now. Bug reports and feature requests are welcome in [Issues](https://github.com/BeShO-ShO/tabula-osk/issues),
 but I can't promise to implement every request.
 
 Parts of this extension were written with the help of AI tools. I follow the GNOME version I use myself, so only the current
@@ -163,7 +170,7 @@ GNOME Shell release is supported. Help with reviewing and maintaining the code i
 ## Credits
 
 * [**TbangIT**](https://github.com/TbangIT): author of [Fluent OSK](https://github.com/TbangIT/fluent-osk) (`fluent-osk@tbang`), the extension this project is based on.
-* [**BeShO-ShO**](https://github.com/BeShO-ShO): Apropos OSK modifications and maintenance.
+* [**BeShO-ShO**](https://github.com/BeShO-ShO): Tabula OSK modifications and maintenance.
 * `words-freq-en.txt` is derived from [FrequencyWords](https://github.com/hermitdave/FrequencyWords) by Hermit Dave
   (OpenSubtitles 2018 word counts), licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
   Changes: lowercased, offensive words removed using the
@@ -178,4 +185,4 @@ GNOME Shell release is supported. Help with reviewing and maintaining the code i
 ## License
 
 [GNU General Public License v3.0](LICENSE). Fluent OSK was released under the same license.
-Changes made in Apropos OSK are also released under GPLv3.
+Changes made in Tabula OSK are also released under GPLv3.

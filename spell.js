@@ -59,7 +59,7 @@ export class SpellChecker {
             this._readLine();
             return true;
         } catch (e) {
-            console.warn('[AproposOSK] spell checker unavailable:', e.message);
+            console.warn('[TabulaOSK] spell checker unavailable:', e.message);
             this._failed = true;
             this._proc = null;
             return false;

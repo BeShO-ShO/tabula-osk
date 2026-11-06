@@ -15,7 +15,7 @@ export class VirtualInput {
                 }
             }
         } catch (e) {
-            console.error('[AproposOSK] Failed to create virtual input device:', e);
+            console.error('[TabulaOSK] Failed to create virtual input device:', e);
         }
     }
 
@@ -42,7 +42,7 @@ export class VirtualInput {
             this._notify(this._getTime(), code, Clutter.KeyState.PRESSED);
             this._activeKeys.add(code);
         } catch (e) {
-            console.error(`[AproposOSK] Failed to press key ${code}:`, e);
+            console.error(`[TabulaOSK] Failed to press key ${code}:`, e);
         }
     }
 
@@ -52,7 +52,7 @@ export class VirtualInput {
             this._notify(this._getTime(), code, Clutter.KeyState.RELEASED);
             this._activeKeys.delete(code);
         } catch (e) {
-            console.error(`[AproposOSK] Failed to release key ${code}:`, e);
+            console.error(`[TabulaOSK] Failed to release key ${code}:`, e);
         }
     }
 
@@ -72,7 +72,7 @@ export class VirtualInput {
             });
             this._tapIds.add(id);
         } catch (e) {
-            console.error(`[AproposOSK] Failed to tap key ${code}:`, e);
+            console.error(`[TabulaOSK] Failed to tap key ${code}:`, e);
         }
     }
 
@@ -111,7 +111,7 @@ export class VirtualInput {
             this._device.notify_keyval(time, keyval, Clutter.KeyState.PRESSED);
             this._device.notify_keyval(time, keyval, Clutter.KeyState.RELEASED);
         } catch (e) {
-            console.error(`[AproposOSK] Failed to type keyval ${keyval}:`, e);
+            console.error(`[TabulaOSK] Failed to type keyval ${keyval}:`, e);
         }
     }
 

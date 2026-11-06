@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
-  <schema id="org.gnome.shell.extensions.apropos-osk" path="/org/gnome/shell/extensions/apropos-osk/">
+  <schema id="org.gnome.shell.extensions.tabula-osk" path="/org/gnome/shell/extensions/tabula-osk/">
     <key name="keyboard-visible" type="b">
       <default>false</default>
       <summary>Whether the keyboard is currently visible</summary>

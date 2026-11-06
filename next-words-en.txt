@@ -1,4 +1,4 @@
-# Apropos OSK: starter list for next-word prediction (US English).
+# Tabula OSK: starter list for next-word prediction (US English).
 # Format: previous word: likely next words, best first.  <s> = start of a sentence.
 # Word pairs counted from Tatoeba English sentences (https://tatoeba.org, CC BY 2.0 FR),
 # limited to the words-freq-en.txt vocabulary; first entries of common words hand-picked.

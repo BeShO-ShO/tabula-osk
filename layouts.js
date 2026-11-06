@@ -236,7 +236,7 @@ Layouts.phone = {
 };
 
 export function getCustomLayoutPath() {
-    return GLib.build_filenamev([GLib.get_user_config_dir(), 'apropos-osk', 'custom_layout.json']);
+    return GLib.build_filenamev([GLib.get_user_config_dir(), 'tabula-osk', 'custom_layout.json']);
 }
 
 export function loadCustomLayout() {
@@ -252,13 +252,13 @@ export function loadCustomLayout() {
             return JSON.parse(str);
         }
     } catch (e) {
-        console.error('[AproposOSK] Failed to load custom layout:', e);
+        console.error('[TabulaOSK] Failed to load custom layout:', e);
     }
     return null;
 }
 
 export function saveCustomLayout(layoutObj) {
-    const dirPath = GLib.build_filenamev([GLib.get_user_config_dir(), 'apropos-osk']);
+    const dirPath = GLib.build_filenamev([GLib.get_user_config_dir(), 'tabula-osk']);
     GLib.mkdir_with_parents(dirPath, 0o755);
     const path = getCustomLayoutPath();
     const file = Gio.File.new_for_path(path);

@@ -11,13 +11,14 @@ import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 
 import { VirtualInput } from './input.js';
-import { AproposKeyboard } from './keyboard.js';
+import { TabulaKeyboard } from './keyboard.js';
+import { OLD_UUID, migrateConfigDir, migrateSettings } from './migrate.js';
 
-const AproposQuickToggle = GObject.registerClass(
-class AproposQuickToggle extends QuickSettings.QuickToggle {
+const TabulaQuickToggle = GObject.registerClass(
+class TabulaQuickToggle extends QuickSettings.QuickToggle {
     _init(extension) {
         super._init({
-            title: _('Apropos Keyboard'),
+            title: _('Tabula Keyboard'),
             subtitle: _('Off'),
             iconName: 'input-keyboard-symbolic',
             toggleMode: true,
@@ -37,12 +38,24 @@ class AproposQuickToggle extends QuickSettings.QuickToggle {
     }
 });
 
-export default class AproposOskExtension extends Extension {
+export default class TabulaOskExtension extends Extension {
     enable() {
+        // Renamed from Apropos OSK: bring over its learned words, custom layout and settings
+        // (once), and make sure the two keyboards never run side by side
+        migrateConfigDir();
+        migrateSettings().then(moved => {
+            if (moved)
+                console.log('[TabulaOSK] settings copied from Apropos OSK');
+        });
+        try {
+            if (Main.extensionManager.lookup(OLD_UUID))
+                Main.extensionManager.disableExtension(OLD_UUID);
+        } catch (e) {}
+
         this._settings = this.getSettings();
         this._input = new VirtualInput();
 
-        this.keyboard = new AproposKeyboard(this._settings, this._input, this);
+        this.keyboard = new TabulaKeyboard(this._settings, this._input, this);
 
         // Build top panel button
         if (this._settings.get_boolean('show-panel-button')) {
@@ -287,7 +300,7 @@ export default class AproposOskExtension extends Extension {
             }
             this._applyStockAllowed(km, allow);
         } catch (err) {
-            console.warn('[AproposOSK] Stock keyboard switch failed:', err);
+            console.warn('[TabulaOSK] Stock keyboard switch failed:', err);
         }
     }
 
@@ -308,13 +321,13 @@ export default class AproposOskExtension extends Extension {
                         else if (km._keyboard && typeof km._keyboard.open === 'function')
                             km._keyboard.open(Main.layoutManager.focusIndex);
                     } catch (err) {
-                        console.warn('[AproposOSK] Could not open stock keyboard:', err);
+                        console.warn('[TabulaOSK] Could not open stock keyboard:', err);
                     }
                     return GLib.SOURCE_REMOVE;
                 });
             }
         } catch (err) {
-            console.warn('[AproposOSK] Stock keyboard switch failed:', err);
+            console.warn('[TabulaOSK] Stock keyboard switch failed:', err);
         }
     }
 
@@ -370,7 +383,7 @@ export default class AproposOskExtension extends Extension {
                 this._hwClosed = true;
             }
         } catch (err) {
-            console.warn('[AproposOSK] last-device handler failed:', err);
+            console.warn('[TabulaOSK] last-device handler failed:', err);
         }
     }
 
@@ -515,7 +528,7 @@ export default class AproposOskExtension extends Extension {
     }
 
     _buildPanelButton() {
-        this._indicator = new PanelMenu.Button(0.0, 'Apropos OSK', true);
+        this._indicator = new PanelMenu.Button(0.0, 'Tabula OSK', true);
 
         // Rimozione click gesture stock per propagazione diretta
         if (this._indicator._clickGesture) {
@@ -552,17 +565,17 @@ export default class AproposOskExtension extends Extension {
             return Clutter.EVENT_PROPAGATE;
         });
 
-        Main.panel.addToStatusArea('apropos-osk-indicator', this._indicator);
+        Main.panel.addToStatusArea('tabula-osk-indicator', this._indicator);
     }
 
     _buildQuickToggle() {
         try {
             this._quickIndicator = new QuickSettings.SystemIndicator();
-            this._quickToggle = new AproposQuickToggle(this);
+            this._quickToggle = new TabulaQuickToggle(this);
             this._quickIndicator.quickSettingsItems.push(this._quickToggle);
             Main.panel.statusArea.quickSettings.addExternalIndicator(this._quickIndicator);
         } catch (e) {
-            console.warn('[AproposOSK] Could not add QuickSettings tile:', e);
+            console.warn('[TabulaOSK] Could not add QuickSettings tile:', e);
         }
     }
 
@@ -571,11 +584,11 @@ export default class AproposOskExtension extends Extension {
             if (isOpen) {
                 this._indicator.add_style_pseudo_class('active');
                 this._indicator.add_style_pseudo_class('checked');
-                this._indicator.add_style_class_name('apropos-osk-btn-active');
+                this._indicator.add_style_class_name('tabula-osk-btn-active');
             } else {
                 this._indicator.remove_style_pseudo_class('active');
                 this._indicator.remove_style_pseudo_class('checked');
-                this._indicator.remove_style_class_name('apropos-osk-btn-active');
+                this._indicator.remove_style_class_name('tabula-osk-btn-active');
             }
         }
 

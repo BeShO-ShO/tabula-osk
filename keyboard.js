@@ -103,13 +103,13 @@ class TypingBoosterBridge {
 
     start() {
         this._queue = this._queue.then(() => this._doStart()).catch(e =>
-            console.warn('[AproposOSK] typing-booster start failed:', e));
+            console.warn('[TabulaOSK] typing-booster start failed:', e));
         return this._queue;
     }
 
     stop() {
         this._queue = this._queue.then(() => this._doStop()).catch(e =>
-            console.warn('[AproposOSK] typing-booster stop failed:', e));
+            console.warn('[TabulaOSK] typing-booster stop failed:', e));
         return this._queue;
     }
 
@@ -156,7 +156,7 @@ class TypingBoosterBridge {
                 throw e;
             }
             this._weEnabled = true;
-            console.warn('[AproposOSK] typing-booster slow to start, continuing');
+            console.warn('[TabulaOSK] typing-booster slow to start, continuing');
         }
         // GNOME 51 swallows that timeout and falls back to plain xkb: check that
         // typing-booster really runs and ask again if not
@@ -191,7 +191,7 @@ class TypingBoosterBridge {
             try {
                 await this._mgr.setCompletionEnabled(false);
             } catch (e) {
-                console.warn('[AproposOSK] could not restore input engine:', e);
+                console.warn('[TabulaOSK] could not restore input engine:', e);
             }
         }
         try {
@@ -398,7 +398,7 @@ const BUNDLED_FONTS = [
     'AtkinsonHyperlegible-Bold.ttf',
 ];
 
-export class AproposKeyboard {
+export class TabulaKeyboard {
     constructor(settings, inputDevice, extension) {
         this._settings = settings;
         this._input = inputDevice;
@@ -514,8 +514,8 @@ export class AproposKeyboard {
 
     _buildUI() {
         this.actor = new St.BoxLayout({
-            name: 'apropos-osk',
-            style_class: 'apropos-osk-container',
+            name: 'tabula-osk',
+            style_class: 'tabula-osk-container',
             orientation: Clutter.Orientation.VERTICAL,
             reactive: true,
             track_hover: true,
@@ -557,7 +557,7 @@ export class AproposKeyboard {
         // Move/resize grip: a thin coloured strip across the top edge. The reactive area is
         // a little taller than the visible strip so it is still easy to grab by touch.
         this._handleBox = new St.Bin({
-            style_class: 'apropos-osk-handle-box',
+            style_class: 'tabula-osk-handle-box',
             track_hover: true,
             x_expand: true,
             y_expand: false,
@@ -565,7 +565,7 @@ export class AproposKeyboard {
             can_focus: false,
         });
         this._dragHandle = new St.Widget({
-            style_class: 'apropos-osk-handle',
+            style_class: 'tabula-osk-handle',
             x_align: Clutter.ActorAlign.CENTER,
             y_align: Clutter.ActorAlign.START,
         });
@@ -576,7 +576,7 @@ export class AproposKeyboard {
         // Header row: [layout] [suggestions ...] [Cfg Dock Norm X]
         // (_buildSuggestBar puts the suggestion bar between the two button groups)
         this._header = new St.BoxLayout({
-            style_class: 'apropos-osk-header',
+            style_class: 'tabula-osk-header',
             orientation: Clutter.Orientation.HORIZONTAL,
             x_expand: true,
             y_expand: false,
@@ -586,7 +586,7 @@ export class AproposKeyboard {
         // Left: Layout switch button
         this._layoutLabel = new St.Button({
             label: this._getLayoutLabelText(),
-            style_class: 'apropos-osk-header-btn',
+            style_class: 'tabula-osk-header-btn',
             y_align: Clutter.ActorAlign.CENTER,
             reactive: true,
             can_focus: false,
@@ -608,7 +608,7 @@ export class AproposKeyboard {
         // Preferenze
         const prefsBtn = new St.Button({
             label: '[Cfg]',
-            style_class: 'apropos-osk-header-btn',
+            style_class: 'tabula-osk-header-btn',
             reactive: true,
             can_focus: false,
         });
@@ -618,7 +618,7 @@ export class AproposKeyboard {
         // Dock toggle button
         this._dockToggleBtn = new St.Button({
             label: this._isDocked ? '[Dock]' : '[Float]',
-            style_class: 'apropos-osk-header-btn',
+            style_class: 'tabula-osk-header-btn',
             reactive: true,
             can_focus: false,
         });
@@ -637,7 +637,7 @@ export class AproposKeyboard {
         // Full-width strut toggle button
         this._widthToggleBtn = new St.Button({
             label: this._dockFullStrip ? '[Full]' : '[Norm]',
-            style_class: 'apropos-osk-header-btn',
+            style_class: 'tabula-osk-header-btn',
             reactive: true,
             can_focus: false,
         });
@@ -667,7 +667,7 @@ export class AproposKeyboard {
         // Close button
         const closeBtn = new St.Button({
             label: '[X]',
-            style_class: 'apropos-osk-header-btn',
+            style_class: 'tabula-osk-header-btn',
             reactive: true,
             can_focus: false,
         });
@@ -717,9 +717,9 @@ export class AproposKeyboard {
             }
 
             if (!this._isDocked) {
-                this._widthToggleBtn.add_style_class_name('apropos-osk-header-btn-disabled');
+                this._widthToggleBtn.add_style_class_name('tabula-osk-header-btn-disabled');
             } else {
-                this._widthToggleBtn.remove_style_class_name('apropos-osk-header-btn-disabled');
+                this._widthToggleBtn.remove_style_class_name('tabula-osk-header-btn-disabled');
             }
         }
     }
@@ -737,13 +737,13 @@ export class AproposKeyboard {
                     try {
                         fontMap.add_font_file(path);
                     } catch (e) {
-                        console.warn(`[AproposOSK] Could not register font ${name}:`, e.message);
+                        console.warn(`[TabulaOSK] Could not register font ${name}:`, e.message);
                     }
                 }
             }
             probe.destroy();
         } catch (e) {
-            console.warn('[AproposOSK] Bundled font registration unavailable, using system fonts:', e.message);
+            console.warn('[TabulaOSK] Bundled font registration unavailable, using system fonts:', e.message);
         }
     }
 
@@ -822,7 +822,7 @@ export class AproposKeyboard {
 
         rowSpecs.forEach((spec, r) => {
             const rowBox = new St.BoxLayout({
-                style_class: spec.isNumber ? 'apropos-osk-row apropos-osk-number-row' : 'apropos-osk-row',
+                style_class: spec.isNumber ? 'tabula-osk-row tabula-osk-number-row' : 'tabula-osk-row',
                 orientation: Clutter.Orientation.HORIZONTAL,
                 x_expand: true,
                 y_expand: false,
@@ -873,7 +873,7 @@ export class AproposKeyboard {
     // Invio ISO: Cairo su DrawingArea, hit-test incavo
     _createIsoEnter(keyDef) {
         const actor = new St.Widget({
-            style_class: 'apropos-osk-iso-enter',
+            style_class: 'tabula-osk-iso-enter',
             style: 'background-color: transparent !important; border: none !important; box-shadow: none !important;',
             layout_manager: new Clutter.BinLayout(),
             reactive: true,
@@ -896,7 +896,7 @@ export class AproposKeyboard {
         });
         const label = new St.Label({
             text: keyDef.label || 'Enter',
-            style_class: 'apropos-osk-iso-enter-label',
+            style_class: 'tabula-osk-iso-enter-label',
             x_expand: true,
             y_expand: true,
             x_align: Clutter.ActorAlign.CENTER,
@@ -988,7 +988,7 @@ export class AproposKeyboard {
         const cr = area.get_context();
         try {
             const pressed = actor.has_style_pseudo_class('pressed');
-            const shifted = actor.has_style_class_name('apropos-osk-enter-shift');
+            const shifted = actor.has_style_class_name('tabula-osk-enter-shift');
             let fill, stroke;
             if (this._isMaterial()) {
                 const light = this._isLight();
@@ -1139,7 +1139,7 @@ export class AproposKeyboard {
                 }
             }
         } catch (e) {
-            console.warn('[AproposOSK] GNOME accent data unavailable:', e.message);
+            console.warn('[TabulaOSK] GNOME accent data unavailable:', e.message);
         }
         this._accentCache.set(name, map);
         return map;
@@ -1188,13 +1188,13 @@ export class AproposKeyboard {
     _addHint(btn, text, left = false) {
         const hint = new St.Label({
             text,
-            style_class: 'apropos-osk-hint',
+            style_class: 'tabula-osk-hint',
             reactive: false,
         });
         hint._btn = btn;
         // Hints on the accent-coloured Enter key take the key's text colour
         if (btn._keyDef?.type === 'enter')
-            hint.add_style_class_name('apropos-osk-hint-accent');
+            hint.add_style_class_name('tabula-osk-hint-accent');
         this._overlay.add_child(hint);
         if (left)
             btn._hintLeftActor = hint;
@@ -1263,7 +1263,7 @@ export class AproposKeyboard {
         const monitor = Main.layoutManager.findMonitorForActor(btn) || Main.layoutManager.primaryMonitor;
 
         const popup = new St.BoxLayout({
-            style_class: 'apropos-osk-lp-popup',
+            style_class: 'tabula-osk-lp-popup',
             orientation: Clutter.Orientation.HORIZONTAL,
             reactive: false,
         });
@@ -1279,7 +1279,7 @@ export class AproposKeyboard {
             });
             label.set_style(`font-family: "${fam}"; font-size: ${fs}px;`);
             const cell = new St.Bin({
-                style_class: 'apropos-osk-lp-cell',
+                style_class: 'tabula-osk-lp-cell',
                 child: label,
             });
             cell.set_size(cellW, cellH);
@@ -1317,9 +1317,9 @@ export class AproposKeyboard {
         lp.sel = idx;
         lp.cells.forEach((c, i) => {
             if (i === idx)
-                c.add_style_class_name('apropos-osk-lp-cell-selected');
+                c.add_style_class_name('tabula-osk-lp-cell-selected');
             else
-                c.remove_style_class_name('apropos-osk-lp-cell-selected');
+                c.remove_style_class_name('tabula-osk-lp-cell-selected');
         });
     }
 
@@ -1360,7 +1360,7 @@ export class AproposKeyboard {
     _createKeyButton(keyDef, isNumberRow = false, indexInRow = -1) {
         const btn = new St.Button({
             label: keyDef.label || '',
-            style_class: 'apropos-osk-key',
+            style_class: 'tabula-osk-key',
             x_expand: false,
             y_expand: false,
             reactive: true,
@@ -1377,50 +1377,50 @@ export class AproposKeyboard {
         }
 
         if (keyDef.type === 'fn') {
-            btn.add_style_class_name('apropos-osk-key-fn');
+            btn.add_style_class_name('tabula-osk-key-fn');
         } else if (keyDef.type === 'fn_toggle' || keyDef.label === 'FN') {
-            btn.add_style_class_name('apropos-osk-key-fn');
+            btn.add_style_class_name('tabula-osk-key-fn');
             this._fnButtons.push(btn);
             if (this.fnActive) {
-                btn.add_style_class_name('apropos-osk-key-active');
+                btn.add_style_class_name('tabula-osk-key-active');
             }
         } else if (['mod', 'ctrl', 'alt', 'super', 'tab'].includes(keyDef.type)) {
-            btn.add_style_class_name('apropos-osk-key-mod');
+            btn.add_style_class_name('tabula-osk-key-mod');
         } else if (keyDef.type === 'enter') {
             // Invio rettangolare fallback (ANSI)
-            btn.add_style_class_name('apropos-osk-enter');
+            btn.add_style_class_name('tabula-osk-enter');
             this._enterButtons.push(btn);
         } else if (keyDef.type === 'arrow') {
-            btn.add_style_class_name('apropos-osk-arrow');
+            btn.add_style_class_name('tabula-osk-arrow');
         } else if (keyDef.type === 'space') {
-            btn.add_style_class_name('apropos-osk-space');
+            btn.add_style_class_name('tabula-osk-space');
             this._spaceButton = btn;
         } else if (keyDef.type === 'backspace') {
             this._backspaceButton = btn;
         }
         // `special: true`: drawn like the modifier keys (e.g. Backspace on the Tablet layout)
         if (keyDef.special)
-            btn.add_style_class_name('apropos-osk-key-mod');
+            btn.add_style_class_name('tabula-osk-key-mod');
 
         if (keyDef.type === 'shift') {
-            btn.add_style_class_name('apropos-osk-key-mod');
+            btn.add_style_class_name('tabula-osk-key-mod');
             this._shiftButtons.push(btn);
         } else if (keyDef.type === 'caps') {
-            btn.add_style_class_name('apropos-osk-key-mod');
+            btn.add_style_class_name('tabula-osk-key-mod');
             this._capsButtons.push(btn);
         } else if (keyDef.type === 'altgr') {
-            btn.add_style_class_name('apropos-osk-key-mod');
+            btn.add_style_class_name('tabula-osk-key-mod');
             this._altgrButtons.push(btn);
         }
 
         // Split key: one button (one hit area) drawn as two small stacked keys.
         if (keyDef.split) {
-            btn.add_style_class_name('apropos-osk-split');
+            btn.add_style_class_name('tabula-osk-split');
             const box = new St.BoxLayout({ orientation: Clutter.Orientation.VERTICAL, x_expand: true, y_expand: true });
             btn._splitHalves = Array.from(keyDef.label.split('\n')).map((t, i) => {
                 const lbl = new St.Label({ text: t, x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER, x_expand: true, y_expand: true });
                 const half = new St.Bin({
-                    style_class: 'apropos-osk-key apropos-osk-arrow apropos-osk-split-half',
+                    style_class: 'tabula-osk-key tabula-osk-arrow tabula-osk-split-half',
                     x_expand: true, y_expand: true, child: lbl,
                 });
                 half._code = keyDef.split[i];
@@ -1693,10 +1693,10 @@ export class AproposKeyboard {
             const next = !current;
             this._toggleKeyStates.set(keyDef.code, next);
             if (next) {
-                btn.add_style_class_name('apropos-osk-key-active');
+                btn.add_style_class_name('tabula-osk-key-active');
                 this._input.pressKey(keyDef.code);
             } else {
-                btn.remove_style_class_name('apropos-osk-key-active');
+                btn.remove_style_class_name('tabula-osk-key-active');
                 this._input.releaseKey(keyDef.code);
             }
             this._updateKeyStyle(btn, false);
@@ -2013,7 +2013,7 @@ export class AproposKeyboard {
 
             if (!this._spaceDrifting && Math.abs(totalDx) > 8) {
                 this._spaceDrifting = true;
-                btn.add_style_class_name('apropos-osk-space-sliding');
+                btn.add_style_class_name('tabula-osk-space-sliding');
                 btn.label = '◀  Drag  ▶';
                 this._updateKeyStyle(btn, true);
             }
@@ -2038,7 +2038,7 @@ export class AproposKeyboard {
             if (!this._backspaceSwiping && totalDx < -10) {
                 this._backspaceSwiping = true;
                 this._stopKeyRepeat();
-                btn.add_style_class_name('apropos-osk-backspace-sliding');
+                btn.add_style_class_name('tabula-osk-backspace-sliding');
                 btn.label = '◀ Delete';
                 this._updateKeyStyle(btn, true);
             }
@@ -2131,7 +2131,7 @@ export class AproposKeyboard {
             if (this._spaceDrifting) {
                 this._spaceDrifting = false;
                 this._currentSpaceStep = 0;
-                btn.remove_style_class_name('apropos-osk-space-sliding');
+                btn.remove_style_class_name('tabula-osk-space-sliding');
                 this._tsUnknown();
                 btn.label = btn._keyDef?.label || 'Space';
                 this._updateKeyStyle(btn, false);
@@ -2145,7 +2145,7 @@ export class AproposKeyboard {
             this._stopKeyRepeat();
             if (this._backspaceSwiping) {
                 this._backspaceSwiping = false;
-                btn.remove_style_class_name('apropos-osk-backspace-sliding');
+                btn.remove_style_class_name('tabula-osk-backspace-sliding');
                 btn.label = btn._keyDef?.label || 'Backspace';
                 this._updateKeyStyle(btn, false);
                 if (this._backspaceSelectCount > 0) {
@@ -2217,7 +2217,7 @@ export class AproposKeyboard {
             if (this._spaceDrifting) {
                 this._spaceDrifting = false;
                 this._currentSpaceStep = 0;
-                btn.remove_style_class_name('apropos-osk-space-sliding');
+                btn.remove_style_class_name('tabula-osk-space-sliding');
                 this._tsUnknown();
                 btn.label = keyDef.label || 'Space';
                 this._updateKeyStyle(btn, false);
@@ -2231,7 +2231,7 @@ export class AproposKeyboard {
             this._stopKeyRepeat();
             if (this._backspaceSwiping) {
                 this._backspaceSwiping = false;
-                btn.remove_style_class_name('apropos-osk-backspace-sliding');
+                btn.remove_style_class_name('tabula-osk-backspace-sliding');
                 btn.label = keyDef.label || 'Backspace';
                 this._updateKeyStyle(btn, false);
                 if (this._backspaceSelectCount > 0) {
@@ -2322,24 +2322,24 @@ export class AproposKeyboard {
         this._cleanupStageGesture();
         this._stopKeyRepeat();
 
-        if (this._spaceDrifting || (this._spaceButton && this._spaceButton.has_style_class_name('apropos-osk-space-sliding'))) {
+        if (this._spaceDrifting || (this._spaceButton && this._spaceButton.has_style_class_name('tabula-osk-space-sliding'))) {
             this._spaceDrifting = false;
             this._currentSpaceStep = 0;
             if (this._spaceButton) {
                 this._spaceButton._down = false;
                 this._spaceButton.remove_style_pseudo_class('pressed');
-                this._spaceButton.remove_style_class_name('apropos-osk-space-sliding');
+                this._spaceButton.remove_style_class_name('tabula-osk-space-sliding');
                 this._spaceButton.label = this._spaceButton._keyDef?.label || 'Space';
                 this._updateKeyStyle(this._spaceButton, false);
             }
         }
 
-        if (this._backspaceSwiping || (this._backspaceButton && this._backspaceButton.has_style_class_name('apropos-osk-backspace-sliding'))) {
+        if (this._backspaceSwiping || (this._backspaceButton && this._backspaceButton.has_style_class_name('tabula-osk-backspace-sliding'))) {
             this._backspaceSwiping = false;
             if (this._backspaceButton) {
                 this._backspaceButton._down = false;
                 this._backspaceButton.remove_style_pseudo_class('pressed');
-                this._backspaceButton.remove_style_class_name('apropos-osk-backspace-sliding');
+                this._backspaceButton.remove_style_class_name('tabula-osk-backspace-sliding');
                 this._backspaceButton.label = this._backspaceButton._keyDef?.label || 'Backspace';
                 this._updateKeyStyle(this._backspaceButton, false);
             }
@@ -2392,7 +2392,7 @@ export class AproposKeyboard {
                 if (!Main.overview.isDummy && this._overviewTarget() === before)
                     Main.overview.toggle();
             } catch (e) {
-                console.warn('[AproposOSK] Overview fallback failed:', e.message);
+                console.warn('[TabulaOSK] Overview fallback failed:', e.message);
             }
             return GLib.SOURCE_REMOVE;
         });
@@ -2444,14 +2444,14 @@ export class AproposKeyboard {
         const phoneCaps = !!(this._layout && this._layout.longPress) && this.capsActive;
         for (const btn of this._shiftButtons) {
             if (this.shiftActive || phoneCaps) {
-                btn.add_style_class_name('apropos-osk-key-active');
+                btn.add_style_class_name('tabula-osk-key-active');
             } else {
-                btn.remove_style_class_name('apropos-osk-key-active');
+                btn.remove_style_class_name('tabula-osk-key-active');
             }
             if (phoneCaps)
-                btn.add_style_class_name('apropos-osk-key-locked');
+                btn.add_style_class_name('tabula-osk-key-locked');
             else
-                btn.remove_style_class_name('apropos-osk-key-locked');
+                btn.remove_style_class_name('tabula-osk-key-locked');
             const base = btn._keyDef?.label;
             if (base === '⇧' || base === '⇪')
                 btn.label = phoneCaps ? '⇪' : base;
@@ -2459,27 +2459,27 @@ export class AproposKeyboard {
 
         for (const btn of this._capsButtons) {
             if (this.capsActive) {
-                btn.add_style_class_name('apropos-osk-key-active');
+                btn.add_style_class_name('tabula-osk-key-active');
             } else {
-                btn.remove_style_class_name('apropos-osk-key-active');
+                btn.remove_style_class_name('tabula-osk-key-active');
             }
         }
 
         // Luminous Alt Gr indicator
         for (const btn of this._altgrButtons) {
             if (this.altgrActive) {
-                btn.add_style_class_name('apropos-osk-key-active');
+                btn.add_style_class_name('tabula-osk-key-active');
             } else {
-                btn.remove_style_class_name('apropos-osk-key-active');
+                btn.remove_style_class_name('tabula-osk-key-active');
             }
         }
 
         // Luminous FN indicator
         for (const btn of this._fnButtons) {
             if (this.fnActive) {
-                btn.add_style_class_name('apropos-osk-key-active');
+                btn.add_style_class_name('tabula-osk-key-active');
             } else {
-                btn.remove_style_class_name('apropos-osk-key-active');
+                btn.remove_style_class_name('tabula-osk-key-active');
             }
         }
 
@@ -2488,11 +2488,11 @@ export class AproposKeyboard {
             const def = btn._keyDef;
             if (!def) continue;
             if (def.code === 29) {
-                if (this._leftCtrlActive) btn.add_style_class_name('apropos-osk-key-active');
-                else btn.remove_style_class_name('apropos-osk-key-active');
+                if (this._leftCtrlActive) btn.add_style_class_name('tabula-osk-key-active');
+                else btn.remove_style_class_name('tabula-osk-key-active');
             } else if (def.code === 97) {
-                if (this._rightCtrlActive) btn.add_style_class_name('apropos-osk-key-active');
-                else btn.remove_style_class_name('apropos-osk-key-active');
+                if (this._rightCtrlActive) btn.add_style_class_name('tabula-osk-key-active');
+                else btn.remove_style_class_name('tabula-osk-key-active');
             }
         }
 
@@ -2501,8 +2501,8 @@ export class AproposKeyboard {
             const def = btn._keyDef;
             if (!def) continue;
             if (def.type === 'alt' || def.code === 56 || def.lpAlt) {
-                if (this.altActive) btn.add_style_class_name('apropos-osk-key-active');
-                else btn.remove_style_class_name('apropos-osk-key-active');
+                if (this.altActive) btn.add_style_class_name('tabula-osk-key-active');
+                else btn.remove_style_class_name('tabula-osk-key-active');
             }
             if (def.lpAlt) {
                 // Super key with latched Alt reads "Alt" while it is held
@@ -2517,10 +2517,10 @@ export class AproposKeyboard {
             for (const btn of this._enterButtons) {
                 if (btn._isEnterPlaceholder) continue;
                 if (this._shiftAll()) {
-                    btn.add_style_class_name('apropos-osk-enter-shift');
+                    btn.add_style_class_name('tabula-osk-enter-shift');
                     btn.label = 'New line';
                 } else {
-                    btn.remove_style_class_name('apropos-osk-enter-shift');
+                    btn.remove_style_class_name('tabula-osk-enter-shift');
                     btn.label = btn._keyDef?.label || 'Enter';
                 }
                 this._updateKeyStyle(btn, false);
@@ -2573,22 +2573,22 @@ export class AproposKeyboard {
             btn._modType = modType;
             btn._isCurrentlyModified = (modType !== null);
 
-            btn.remove_style_class_name('apropos-osk-key-modified');
-            btn.remove_style_class_name('apropos-osk-key-modified-level1');
-            btn.remove_style_class_name('apropos-osk-key-modified-level2');
-            btn.remove_style_class_name('apropos-osk-key-mod-shift');
-            btn.remove_style_class_name('apropos-osk-key-mod-altgr');
-            btn.remove_style_class_name('apropos-osk-key-mod-both');
-            btn.remove_style_class_name('apropos-osk-key-mod-fn');
+            btn.remove_style_class_name('tabula-osk-key-modified');
+            btn.remove_style_class_name('tabula-osk-key-modified-level1');
+            btn.remove_style_class_name('tabula-osk-key-modified-level2');
+            btn.remove_style_class_name('tabula-osk-key-mod-shift');
+            btn.remove_style_class_name('tabula-osk-key-mod-altgr');
+            btn.remove_style_class_name('tabula-osk-key-mod-both');
+            btn.remove_style_class_name('tabula-osk-key-mod-fn');
 
             if (modType === 'shift') {
-                btn.add_style_class_name('apropos-osk-key-mod-shift');
+                btn.add_style_class_name('tabula-osk-key-mod-shift');
             } else if (modType === 'altgr') {
-                btn.add_style_class_name('apropos-osk-key-mod-altgr');
+                btn.add_style_class_name('tabula-osk-key-mod-altgr');
             } else if (modType === 'both') {
-                btn.add_style_class_name('apropos-osk-key-mod-both');
+                btn.add_style_class_name('tabula-osk-key-mod-both');
             } else if (modType === 'fn') {
-                btn.add_style_class_name('apropos-osk-key-mod-fn');
+                btn.add_style_class_name('tabula-osk-key-mod-fn');
             }
 
             this._updateKeyStyle(btn, false);
@@ -2855,17 +2855,17 @@ export class AproposKeyboard {
         if (this._isDocked) {
             if (this._dockFullStrip) {
                 posY = monitor.y + monitor.height - actualH;
-                this.actor.add_style_class_name('apropos-osk-full-strip');
-                this.actor.remove_style_class_name('apropos-osk-floating');
+                this.actor.add_style_class_name('tabula-osk-full-strip');
+                this.actor.remove_style_class_name('tabula-osk-floating');
             } else {
                 posY = monitor.y + monitor.height - actualH;
-                this.actor.remove_style_class_name('apropos-osk-full-strip');
-                this.actor.remove_style_class_name('apropos-osk-floating');
+                this.actor.remove_style_class_name('tabula-osk-full-strip');
+                this.actor.remove_style_class_name('tabula-osk-floating');
             }
         } else {
             posY = monitor.y + Math.round(monitor.height - actualH - 50);
-            this.actor.add_style_class_name('apropos-osk-floating');
-            this.actor.remove_style_class_name('apropos-osk-full-strip');
+            this.actor.add_style_class_name('tabula-osk-floating');
+            this.actor.remove_style_class_name('tabula-osk-full-strip');
         }
 
         this.actor.set_size(targetW, actualH);
@@ -2913,7 +2913,7 @@ export class AproposKeyboard {
             let yCursor = 0;
             for (let r = 0; r < this._rows.length; r++) {
                 const row = this._rows[r];
-                const isNumRow = (r === 0 && row.box.has_style_class_name('apropos-osk-number-row'));
+                const isNumRow = (r === 0 && row.box.has_style_class_name('tabula-osk-number-row'));
                 const isLastRow = (r === this._rows.length - 1);
 
                 // Row vertical gap / number row gap
@@ -3053,7 +3053,7 @@ export class AproposKeyboard {
                 });
             });
         } catch (err) {
-            console.warn('[AproposOSK] typing-booster bridge unavailable:', err);
+            console.warn('[TabulaOSK] typing-booster bridge unavailable:', err);
             this._tbBridge = null;
         }
     }
@@ -3124,7 +3124,7 @@ export class AproposKeyboard {
             else
                 this._tbBridge.stop();
         } catch (err) {
-            console.warn('[AproposOSK] typing-booster sync failed:', err);
+            console.warn('[TabulaOSK] typing-booster sync failed:', err);
         }
         this._tsRefresh();
     }
@@ -3156,7 +3156,7 @@ export class AproposKeyboard {
 
     _tsBuildBarWidgets() {
         this._suggestBar = new St.BoxLayout({
-            style_class: 'apropos-osk-suggest-bar',
+            style_class: 'tabula-osk-suggest-bar',
             orientation: Clutter.Orientation.HORIZONTAL,
             x_expand: true,
             y_expand: true,
@@ -3194,7 +3194,7 @@ export class AproposKeyboard {
                         try {
                             c.cb();
                         } catch (err) {
-                            console.warn('[AproposOSK] typing-booster commit failed:', err);
+                            console.warn('[TabulaOSK] typing-booster commit failed:', err);
                         }
                         this._acUpdate();
                     }
@@ -3259,7 +3259,7 @@ export class AproposKeyboard {
                     .map(s => s.trim()).filter(Boolean);
             }
         } catch (err) {
-            console.warn('[AproposOSK] Could not load words-en.txt:', err);
+            console.warn('[TabulaOSK] Could not load words-en.txt:', err);
         }
     }
 
@@ -3303,7 +3303,7 @@ export class AproposKeyboard {
     }
 
     _tsLearnedPath() {
-        return GLib.build_filenamev([GLib.get_user_config_dir(), 'apropos-osk', 'learned-words.json']);
+        return GLib.build_filenamev([GLib.get_user_config_dir(), 'tabula-osk', 'learned-words.json']);
     }
 
     _tsLoadLearned() {
@@ -3318,7 +3318,7 @@ export class AproposKeyboard {
                     this._tsLearned = obj;
             }
         } catch (err) {
-            console.warn('[AproposOSK] Could not read learned words:', err);
+            console.warn('[TabulaOSK] Could not read learned words:', err);
         }
     }
 
@@ -3327,14 +3327,14 @@ export class AproposKeyboard {
         if (!this._tsLearnedDirty)
             return;
         try {
-            const dir = GLib.build_filenamev([GLib.get_user_config_dir(), 'apropos-osk']);
+            const dir = GLib.build_filenamev([GLib.get_user_config_dir(), 'tabula-osk']);
             GLib.mkdir_with_parents(dir, 0o700);
             const f = Gio.File.new_for_path(this._tsLearnedPath());
             f.replace_contents(JSON.stringify(this._tsLearned), null, false,
                 Gio.FileCreateFlags.REPLACE_DESTINATION | Gio.FileCreateFlags.PRIVATE, null);
             this._tsLearnedDirty = false;
         } catch (err) {
-            console.warn('[AproposOSK] Could not save learned words:', err);
+            console.warn('[TabulaOSK] Could not save learned words:', err);
         }
     }
 
@@ -3558,7 +3558,7 @@ export class AproposKeyboard {
             if (ok)
                 this._nw.loadSeed(new TextDecoder().decode(bytes));
         } catch (err) {
-            console.warn('[AproposOSK] Could not load next-words-en.txt:', err.message);
+            console.warn('[TabulaOSK] Could not load next-words-en.txt:', err.message);
         }
         try {
             const f = Gio.File.new_for_path(this._nwPath());
@@ -3569,7 +3569,7 @@ export class AproposKeyboard {
                     this._nw.learned = obj;
             }
         } catch (err) {
-            console.warn('[AproposOSK] Could not read learned word pairs:', err.message);
+            console.warn('[TabulaOSK] Could not read learned word pairs:', err.message);
         }
         this._nwReady = true;
     }
@@ -3616,7 +3616,7 @@ export class AproposKeyboard {
     }
 
     _nwPath() {
-        return GLib.build_filenamev([GLib.get_user_config_dir(), 'apropos-osk', 'learned-pairs.json']);
+        return GLib.build_filenamev([GLib.get_user_config_dir(), 'tabula-osk', 'learned-pairs.json']);
     }
 
     _nwSaveNow() {
@@ -3624,13 +3624,13 @@ export class AproposKeyboard {
             return;
         try {
             this._nw.prune();
-            const dir = GLib.build_filenamev([GLib.get_user_config_dir(), 'apropos-osk']);
+            const dir = GLib.build_filenamev([GLib.get_user_config_dir(), 'tabula-osk']);
             GLib.mkdir_with_parents(dir, 0o700);
             Gio.File.new_for_path(this._nwPath()).replace_contents(JSON.stringify(this._nw.learned),
                 null, false, Gio.FileCreateFlags.REPLACE_DESTINATION | Gio.FileCreateFlags.PRIVATE, null);
             this._nwDirty = false;
         } catch (err) {
-            console.warn('[AproposOSK] Could not save learned word pairs:', err.message);
+            console.warn('[TabulaOSK] Could not save learned word pairs:', err.message);
         }
     }
 
@@ -4182,7 +4182,7 @@ export class AproposKeyboard {
             const [ok, bytes] = Gio.File.new_for_path(p).load_contents(null);
             this._freq = new TL.WordFreq(ok ? new TextDecoder().decode(bytes) : '');
         } catch (e) {
-            console.warn('[AproposOSK] Could not load words-freq-en.txt:', e.message);
+            console.warn('[TabulaOSK] Could not load words-freq-en.txt:', e.message);
             this._freq = new TL.WordFreq('');
         }
     }
@@ -4250,7 +4250,7 @@ export class AproposKeyboard {
                     this._tsLearn(fix.toLowerCase());
             }
         } catch (e) {
-            console.warn('[AproposOSK] autocorrect failed:', e.message);
+            console.warn('[TabulaOSK] autocorrect failed:', e.message);
         }
     }
 
@@ -4447,13 +4447,13 @@ export class AproposKeyboard {
     _themeClasses() {
         if (!this._isMaterial())
             return [];
-        return ['apropos-osk-theme-material', this._isLight() ? 'apropos-osk-light' : 'apropos-osk-dark'];
+        return ['tabula-osk-theme-material', this._isLight() ? 'tabula-osk-light' : 'tabula-osk-dark'];
     }
 
     _applyTheme() {
         if (!this.actor)
             return;
-        for (const c of ['apropos-osk-theme-material', 'apropos-osk-light', 'apropos-osk-dark'])
+        for (const c of ['tabula-osk-theme-material', 'tabula-osk-light', 'tabula-osk-dark'])
             this.actor.remove_style_class_name(c);
         for (const c of this._themeClasses())
             this.actor.add_style_class_name(c);

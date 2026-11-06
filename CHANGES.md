@@ -1,5 +1,14 @@
 # Changes
 
+## Unreleased
+- **Renamed to Tabula OSK** (was Apropos OSK, which also clashed with the `apropos` command). New extension ID
+  `tabula-osk@besho-sho`, settings schema `org.gnome.shell.extensions.tabula-osk`, config folder `~/.config/tabula-osk/`,
+  repository `BeShO-ShO/tabula-osk`. On its first start Tabula OSK copies the settings (dconf
+  `/org/gnome/shell/extensions/apropos-osk/`), learned words and custom layout from Apropos OSK, and turns the old
+  extension off if it is still enabled.
+- Layout editor: **Reset to Tablet** button (next to Reset to Italian / US). A custom layout started from it keeps the Tablet
+  layout's long-press symbols, corner hints and keys like Tab and Caps Lock.
+
 ## 1.1.2 (2026-11-06)
 - **Tablet layout reworked after Gboard's tablet keyboard** (12 units per row): `` ` `` and Backspace frame the number row;
   Tab (hold for Esc) and a `|` key (Shift gives `\`, new `invShift` key property) frame the q row; Caps Lock and a wide Enter

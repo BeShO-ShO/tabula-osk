@@ -115,7 +115,7 @@ function createColorPickerRow(title, subtitle, onColorSelected, onReset) {
     };
 }
 
-export default class AproposOskPreferences extends ExtensionPreferences {
+export default class TabulaOskPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
 
@@ -696,6 +696,19 @@ export default class AproposOskPreferences extends ExtensionPreferences {
             updateInspector();
         });
         toolbarRow1.append(resetUsBtn);
+
+        // Tablet (Gboard style): long-press symbols, corner hints and its layout options
+        // (longPress, accents) are copied too, so a custom layout made from it keeps them
+        const resetTabletBtn = new Gtk.Button({ label: _('Reset to Tablet') });
+        resetTabletBtn.connect('clicked', () => {
+            editingLayout = JSON.parse(JSON.stringify(Layouts.phone));
+            editingLayout.name = 'Custom';
+            selectedRowIdx = 0;
+            selectedKeyIdx = 0;
+            renderVisualKeyboard();
+            updateInspector();
+        });
+        toolbarRow1.append(resetTabletBtn);
         mainToolbarBox.append(toolbarRow1);
 
         const toolbarRow2 = new Gtk.Box({
