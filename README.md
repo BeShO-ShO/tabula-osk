@@ -73,7 +73,7 @@ and the *Atkinson Hyperlegible Next* font for the default key labels. If that fo
 * **TKL layout:** Esc, a combined number/Fn row (F1 to F12), arrows, and all modifiers: Shift, Ctrl, Alt, AltGr, Super and Fn.
   Combinations such as `Ctrl+Alt+Del` and `Super+key` work.
 * **Built-in layouts:** Italian (ISO, with the tall Enter key), US (ANSI), and **Tablet (US, Gboard style)**: a touch layout
-  with a number row, laid out like a tablet keyboard: `Backspace` ends the top letter row and `Enter` the home row (a row apart, so they are hard to mix up), `Shift` on both sides with `,` `.` beside `m`, and `Ctrl` `❖` `Space` `▲` `▼` at the bottom (slide on Space for Left/Right). Tap `❖` for Super, long-press it for a sticky `Alt` (long-press again to release). Long-press `▲`/`▼` for Page Up/Down, or Shift+Page Up/Down to scroll a terminal's history.
+  laid out like Gboard's tablet keyboard: `` ` `` and the number row ending in `Backspace`; `Tab` (hold for `Esc`) and `|` (Shift for `\`) around the top letter row; `Caps Lock` and `Enter` (→) around the home row; `Shift` on both sides with `,` `.` beside `m` (hold `,` for the emoji chooser in GTK apps, hold `.` for `./` `../` `~/` `.com`); and `Ctrl` `❖` `/` `Space` `▲` `▼` at the bottom (slide on Space for Left/Right). Tap `❖` for Super, long-press it for a sticky `Alt` (tap it again to release). Long-press `▲`/`▼` for Page Up/Down (▼ starts on Page Down), or Shift+Page Up/Down to scroll a terminal's history.
 * **Modifier behavior:** each key can work as a normal key (hold) or as an on/off switch (latch).
 * **Modified-key highlight:** while Shift, AltGr or Fn is active, the keys that change symbol are colored. The colors can be changed.
 * **Super key:** a tap opens the Activities overview, and holding it with another key sends the combination.
@@ -89,7 +89,7 @@ and the *Atkinson Hyperlegible Next* font for the default key labels. If that fo
 The sensitivity of both gestures can be set in pixels per character.
 
 ### Smart typing
-* **Word suggestions:** a suggestion bar above the keys with three completions, the best one in the middle.
+* **Word suggestions:** shown in the top row of the keyboard, between the layout button and the Cfg/Dock/Width/Close buttons: three completions, the best one in the middle.
   The keyboard learns new words as you type. Learned words stay on your computer, in `~/.config/apropos-osk/`.
 * **Next-word prediction:** after a space, or at the start of a sentence, the bar offers the likely next word. It learns the word pairs you type (stored only in `~/.config/apropos-osk/learned-pairs.json`), also uses the pairs Typing Booster has learned, and starts from a small built-in list.
 * **Typing Booster mode:** suggestions can come from `ibus-typing-booster` instead, which sees the real text and shows six candidates.
@@ -98,7 +98,7 @@ The sensitivity of both gestures can be set in pixels per character.
   If Typing Booster is not installed, the built-in list is used.
 * **Privacy:** nothing you type is logged. Password and PIN fields are never recorded and never show suggestions.
 * **Long-press for accents and symbols (Tablet layout):** hold a key, slide to a character and let go. Each key shows its symbol
-  in the corner (`q` → `%`, `a` → `@`, `.` → `?` …), followed by the accented letters from GNOME's own keyboard data (`e` → `è é ê ë ē`).
+  in the corner, mostly as on Gboard (`e` → `|`, `t` → `[`, `m` → `?` …; no symbol appears twice, so anything a key already gives with Shift is left out and those keys offer `°` `≠` `±` `©` `€` `£` `¥` `•` `…` `×` `÷` instead; `?` stays on `m` as on Gboard), followed by the accented letters from GNOME's own keyboard data (`e` → `è é ê ë ē`).
   Double-tap Shift for Caps Lock.
 * **Auto-capitalization:** Shift turns on by itself at the start of a sentence and in an empty field. It only affects letters,
   so Enter stays Enter and digits stay digits. Tap Shift to type a small letter instead.
@@ -120,12 +120,12 @@ The sensitivity of both gestures can be set in pixels per character.
 * **Manual toggle:** from a top bar button (can be hidden) or a Quick Settings tile.
 
 ### Position and size
-* **Docked:** fixed to the bottom of the screen. Drag the bar at the top of the keyboard to change its height.
+* **Docked:** fixed to the bottom of the screen. Drag the small tinted bar at the top centre of the keyboard to change its height.
 * **Floating:** a free window you can drag anywhere.
 * **Full width (strut mode):** covers the whole bottom of the screen and pushes windows up so no text field is hidden.
   Keys can stay at normal width, centered.
-* Width and height as a percentage of the screen, with a separate height for portrait orientation.
-* Header buttons to switch layout and mode, open the settings, and close the keyboard.
+* Width as a percentage of the screen in the settings; height set by dragging the bar at the top of the docked keyboard, with a separate height for portrait orientation.
+* Header buttons to switch layout and mode, open the settings, and close the keyboard. The layout button cycles only through the layouts switched on under *Layouts in the header toggle* in the settings.
 
 ### Appearance
 * Two key styles: **Fluent** (Windows 11 look) and **Material** (flat phone look that follows the system light/dark style).
@@ -149,7 +149,7 @@ the Space and Backspace gestures, auto-pairing, the font and spacing settings an
 * blocking of the stock GNOME keyboard, and using it on purpose in system dialogs
 * word suggestions with word learning, and the Typing Booster mode
 * the Quick Settings tile
-* the drag bar to resize the docked keyboard, and a separate height for portrait orientation
+* the small tinted bar at the top to resize the docked keyboard, and a separate height for portrait orientation
 * a new name, UUID and settings schema, so it can be installed next to the original
 
 ## Known issues

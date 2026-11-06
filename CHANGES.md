@@ -1,5 +1,40 @@
 # Changes
 
+## 1.1.2 (2026-11-06)
+- **Tablet layout reworked after Gboard's tablet keyboard** (12 units per row): `` ` `` and Backspace frame the number row;
+  Tab (hold for Esc) and a `|` key (Shift gives `\`, new `invShift` key property) frame the q row; Caps Lock and a wide Enter
+  frame the home row (double-tap Shift still gives Caps Lock); `/` (Shift `?`) on the bottom row between Super and Space.
+  Letter hints follow Gboard, but no symbol appears twice (anything a key types with Shift is not repeated as a hint; `?` on
+  `m` is the one kept on purpose). Hold `,` = Ctrl+. (emoji chooser in GTK apps); hold `.` = `./`, `../`, `~/`, `.com`
+  (new `noAccents` key property skips GNOME's extras). Backspace uses the modifier-key colour.
+- **Compact header**: word suggestions now sit in the header row between the layout button and the Cfg/Dock/Width/Close
+  buttons (no separate suggestion bar), and the resize/move handle is a small centred pill.
+- **Taps in empty space go to the nearest key** (like Gboard): the strip below the bottom row, the gaps between keys, the side
+  padding and the half-key indent. A tap just under the space bar types a space. Not the header, suggestions or handle.
+- New setting **Layouts in the header toggle** (`layout-cycle`): choose which layouts the layout button at the top left
+  cycles through.
+- The **Keyboard height (%)** setting is removed: the height is set by dragging the bar at the top of the docked keyboard
+  (stored separately for landscape and portrait).
+- Fixed: a resize drag only ended when the finger was lifted over the (thin) drag bar; a missed release left a temporary
+  height in place, so later height changes did nothing. The drag now follows the finger or mouse button until it is lifted
+  anywhere, and closing the keyboard mid-drag keeps the dragged height.
+- Show/hide fixes:
+  - Volume, power and brightness buttons and other switches report themselves as keyboards; pressing them no longer hides
+    the keyboard as if the Type Cover were used, or stops it from opening on the next touch.
+  - Tapping a text field that already has the focus opens the keyboard again (apps that ask for an on-screen keyboard on
+    tap, e.g. GTK and Chromium-based apps), also after closing it with ✕.
+  - A brief focus loss (shorter than the hide delay) no longer stops the keyboard from hiding later, or from hiding on a
+    Type Cover key.
+  - No pop-up keyboard after switching workspaces or tapping the dock: opening automatically needs a tap in the window that
+    gets the focus.
+  - GNOME's own keyboard (used in system dialogs) is hidden before it is turned off. Destroying it while visible left a signal
+    handler behind that logged errors to the journal, and could leave fullscreen unredirect disabled.
+- **Typing Booster suggestions back in the keyboard instead of next to the text**: on GNOME 51 a slow first start of
+  Typing Booster times out, the Shell falls back to plain xkb and its record of the active engine can stay wrong after
+  Typing Booster does come up. The keyboard now follows the real IBus engine, sends candidates to its own bar whenever
+  Typing Booster runs while it is open, adopts an engine left running, asks again if the start fell back, and restores the
+  input source's engine after closing if Typing Booster is still active.
+
 ## 1.1.1 (2026-11-04)
 - **GNOME Shell 51** support (Fedora 45): uses `global.stage.context.get_backend()` instead of the removed
   `Clutter.get_default_backend()`, and `orientation` instead of `St.BoxLayout`'s `vertical` property.

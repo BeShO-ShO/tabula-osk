@@ -8,6 +8,7 @@ import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Meta from 'gi://Meta';
 
 import { VirtualInput } from './input.js';
 import { AproposKeyboard } from './keyboard.js';
@@ -111,8 +112,72 @@ export default class AproposOskExtension extends Extension {
             return GLib.SOURCE_CONTINUE;
         });
         this._keyFocusId = global.stage.connect('notify::key-focus', () => this._pollTextFocus());
+        // Remember where the last touch landed and when focus moved for other reasons
+        // (workspace switch, a dock or app-grid tap), so only a tap on the window that
+        // gets the focus opens the keyboard.
+        this._touchStageId = global.stage.connect('captured-event', (stage, ev) => {
+            if (ev.type() === Clutter.EventType.TOUCH_BEGIN) {
+                this._lastTouchUs = GLib.get_monotonic_time();
+                try {
+                    this._lastTouchActor = global.stage.get_event_actor
+                        ? global.stage.get_event_actor(ev) : ev.get_source();
+                } catch (err) {
+                    this._lastTouchActor = null;
+                }
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+        this._wsChangedId = global.workspace_manager.connect('active-workspace-changed', () => {
+            this._wsChangedUs = GLib.get_monotonic_time();
+        });
+        this._focusWinId = global.display.connect('notify::focus-window', () => {
+            this._focusWinChangedUs = GLib.get_monotonic_time();
+        });
         this._lastDeviceId = global.backend.connect('last-device-changed',
             (backend, device) => this._onLastDeviceChanged(backend, device));
+        // Apps ask for the on-screen keyboard when a text field is tapped, also when that
+        // field already has the focus (GTK, Qt, Chromium...): reopen it then.
+        try {
+            this._panelStateId = Main.inputMethod.connect('input-panel-state',
+                (im, state) => this._onPanelState(state));
+        } catch (err) {
+            this._panelStateId = 0;
+        }
+    }
+
+    _onPanelState(state) {
+        const S = Clutter.InputPanelState;
+        if (state !== S.ON && state !== S.TOGGLE)
+            return;
+        if (!this.keyboard || this.keyboard.isOpen || this._panelOpenId)
+            return;
+        // A hardware key hid the keyboard: only a touch brings it back
+        if ((this._touchOnlyEnabled() || this._hwClosed) && !this._lastInputWasTouch())
+            return;
+        // Let the focus settle (the request can arrive just before the poll notices it)
+        this._panelOpenId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 60, () => {
+            this._panelOpenId = 0;
+            if (!this.keyboard || this.keyboard.isOpen)
+                return GLib.SOURCE_REMOVE;
+            if (!this._textFieldFocused() || this._focusInModalDialog())
+                return GLib.SOURCE_REMOVE;
+            if (!this._focusGainFromTap())
+                return GLib.SOURCE_REMOVE;
+            try {
+                const inhibit = Clutter.InputContentHintFlags.INHIBIT_OSK ?? 0;
+                if (inhibit && ((Main.inputMethod.contentHints ?? Main.inputMethod.content_hints ?? 0) & inhibit))
+                    return GLib.SOURCE_REMOVE;
+            } catch (err) {}
+            if (this._autoHideId) {
+                GLib.source_remove(this._autoHideId);
+                this._autoHideId = 0;
+            }
+            this.keyboard.open();
+            this._autoOpened = true;
+            this._hwClosed = false;
+            this._lastFocused = true;
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _disarmAutoShow() {
@@ -132,6 +197,19 @@ export default class AproposOskExtension extends Extension {
             global.backend.disconnect(this._lastDeviceId);
             this._lastDeviceId = 0;
         }
+        if (this._touchStageId) {
+            global.stage.disconnect(this._touchStageId);
+            this._touchStageId = 0;
+        }
+        if (this._wsChangedId) {
+            global.workspace_manager.disconnect(this._wsChangedId);
+            this._wsChangedId = 0;
+        }
+        if (this._focusWinId) {
+            global.display.disconnect(this._focusWinId);
+            this._focusWinId = 0;
+        }
+        this._lastTouchActor = null;
         if (this._stockOpenId) {
             GLib.source_remove(this._stockOpenId);
             this._stockOpenId = 0;
@@ -139,6 +217,18 @@ export default class AproposOskExtension extends Extension {
         if (this._reopenId) {
             GLib.source_remove(this._reopenId);
             this._reopenId = 0;
+        }
+        if (this._panelStateId) {
+            Main.inputMethod.disconnect(this._panelStateId);
+            this._panelStateId = 0;
+        }
+        if (this._panelOpenId) {
+            GLib.source_remove(this._panelOpenId);
+            this._panelOpenId = 0;
+        }
+        if (this._stockBlockId) {
+            GLib.source_remove(this._stockBlockId);
+            this._stockBlockId = 0;
         }
         if (this._stockBlocked) {
             try {
@@ -166,9 +256,43 @@ export default class AproposOskExtension extends Extension {
             return;
         this._stockAllowed = allow;
         const km = Main.keyboard;
+        if (this._stockBlockId) {
+            GLib.source_remove(this._stockBlockId);
+            this._stockBlockId = 0;
+        }
         try {
             if (!km || typeof km._lastDeviceIsTouchscreen !== 'function')
                 return;
+            if (!allow) {
+                if (this._stockOpenId) {
+                    GLib.source_remove(this._stockOpenId);
+                    this._stockOpenId = 0;
+                }
+                // Turning the stock keyboard off destroys it. Destroyed while it is shown,
+                // it leaves a signal handler behind (errors in the journal), fullscreen
+                // unredirect disabled and possibly the focused window shifted up. So hide
+                // it first and turn it off once its 150 ms hide animation has finished.
+                const kb = km._keyboard;
+                if (kb && (kb._keyboardVisible || kb._keyboardRequested)) {
+                    try {
+                        kb.close(true);
+                    } catch (err) {}
+                    this._stockBlockId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 300, () => {
+                        this._stockBlockId = 0;
+                        this._applyStockAllowed(km, false);
+                        return GLib.SOURCE_REMOVE;
+                    });
+                    return;
+                }
+            }
+            this._applyStockAllowed(km, allow);
+        } catch (err) {
+            console.warn('[AproposOSK] Stock keyboard switch failed:', err);
+        }
+    }
+
+    _applyStockAllowed(km, allow) {
+        try {
             km._lastDeviceIsTouchscreen = () => allow;
             this._stockBlocked = true;
             if (typeof km._syncEnabled === 'function')
@@ -204,19 +328,34 @@ export default class AproposOskExtension extends Extension {
         }
     }
 
+    _deviceName(device) {
+        try {
+            return (device.get_device_name ? device.get_device_name() : device.name) || '';
+        } catch (err) {
+            return '';
+        }
+    }
+
+    // Many things that are not keyboards report themselves as keyboard devices: power
+    // and volume buttons ("Power Button", "Intel HID 5 button array"), brightness keys
+    // ("Video Bus"), switches and media-key interfaces. Only a real keyboard (e.g. the
+    // Type Cover) counts as typing on a hardware keyboard.
+    _isTypingKeyboard(device) {
+        if (!device || device.device_type !== Clutter.InputDeviceType.KEYBOARD_DEVICE)
+            return false;
+        const name = this._deviceName(device);
+        if (/virtual|button|switch|video bus|intel hid|consumer control|system control|wireless radio|hotkey|headphone|headset|speaker|hda /i.test(name))
+            return false;
+        // Ignore events caused by our own on-screen keyboard typing
+        if (this._input && this._input.recentlyActive(300))
+            return false;
+        return true;
+    }
+
     _onLastDeviceChanged(backend, device) {
         try {
             this._trackLastDevice(device);
-            if (!device || device.device_type !== Clutter.InputDeviceType.KEYBOARD_DEVICE)
-                return;
-            let name = '';
-            try {
-                name = (device.get_device_name ? device.get_device_name() : device.name) || '';
-            } catch (err) {}
-            if (/virtual/i.test(name))
-                return;
-            // Ignore events caused by our own on-screen keyboard typing
-            if (this._input && this._input.recentlyActive(300))
+            if (!this._isTypingKeyboard(device))
                 return;
             if (this.keyboard && this.keyboard._tsUnknown)
                 this.keyboard._tsUnknown();
@@ -259,15 +398,10 @@ export default class AproposOskExtension extends Extension {
         if (!device)
             return;
         const type = device.device_type;
-        if (type === Clutter.InputDeviceType.KEYBOARD_DEVICE) {
-            let name = '';
-            try {
-                name = (device.get_device_name ? device.get_device_name() : device.name) || '';
-            } catch (err) {}
-            // Our own on-screen typing must not count as "keyboard was last used"
-            if (/virtual/i.test(name) || (this._input && this._input.recentlyActive(300)))
-                return;
-        }
+        // Buttons, switches and our own on-screen typing must not count as
+        // "keyboard was last used"
+        if (type === Clutter.InputDeviceType.KEYBOARD_DEVICE && !this._isTypingKeyboard(device))
+            return;
         const touchTypes = [Clutter.InputDeviceType.TOUCHSCREEN_DEVICE,
             Clutter.InputDeviceType.PEN_DEVICE];
         this._lastDeviceIsTouch = touchTypes.includes(type);
@@ -289,6 +423,37 @@ export default class AproposOskExtension extends Extension {
             this._hwClosed = false;
             return GLib.SOURCE_REMOVE;
         });
+    }
+
+    // Was the text focus reached by tapping it? A workspace switch, or a tap on the dock,
+    // app grid or overview, moves the focus to a window whose text field was already
+    // focused: that must not pop the keyboard up.
+    _focusGainFromTap() {
+        try {
+            const f = global.stage.key_focus;
+            // Shell entries (Activities search, run dialog): unchanged behaviour
+            if (f && f instanceof Clutter.Text)
+                return true;
+            const now = GLib.get_monotonic_time();
+            const recent = t => t && now - t < 1000 * 1000;
+            if (recent(this._wsChangedUs))
+                return false;
+            if (!recent(this._focusWinChangedUs))
+                return true;
+            // The focused window just changed: only if the touch landed on it
+            const win = global.display.focus_window;
+            if (!win || !recent(this._lastTouchUs))
+                return false;
+            let a = this._lastTouchActor;
+            while (a) {
+                if (a instanceof Meta.WindowActor)
+                    return a.get_meta_window() === win;
+                a = a.get_parent();
+            }
+            return false;
+        } catch (err) {
+            return true;
+        }
     }
 
     _textFieldFocused() {
@@ -322,7 +487,8 @@ export default class AproposOskExtension extends Extension {
                 this._autoHideId = 0;
             }
             if (!this.keyboard.isOpen &&
-                (!this._touchOnlyEnabled() || this._lastInputWasTouch())) {
+                (!this._touchOnlyEnabled() || this._lastInputWasTouch()) &&
+                this._focusGainFromTap()) {
                 this.keyboard.open();
                 this._autoOpened = true;
             }
@@ -335,8 +501,12 @@ export default class AproposOskExtension extends Extension {
                     this.keyboard.recentlyInteracted(2000))
                     return GLib.SOURCE_CONTINUE;
                 this._autoHideId = 0;
-                if (this._autoOpened && !this._textFieldFocused() &&
-                    this.keyboard && this.keyboard.isOpen)
+                // Focus came back to a text field: keep the keyboard and remember that
+                // it was opened automatically, so it still hides later (also on a
+                // hardware key)
+                if (this._textFieldFocused())
+                    return GLib.SOURCE_REMOVE;
+                if (this._autoOpened && this.keyboard && this.keyboard.isOpen)
                     this.keyboard.close();
                 this._autoOpened = false;
                 return GLib.SOURCE_REMOVE;

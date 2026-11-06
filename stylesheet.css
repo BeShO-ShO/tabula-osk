@@ -11,7 +11,7 @@
     border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 12px 12px 0 0;
     box-shadow: none;
-    padding: 6px 12px 8px 12px;
+    padding: 2px 12px 8px 12px;
 }
 
 .apropos-osk-floating {
@@ -28,22 +28,26 @@
     box-shadow: none;
 }
 
-/* Header toolbar */
+/* Header toolbar (layout button, word suggestions, Cfg/Dock/Norm/X) */
 .apropos-osk-header {
-    height: 28px;
-    margin-bottom: 4px;
+    height: 34px;
+    margin-bottom: 2px;
+}
+
+/* Move/resize grip: just a thin tinted strip along the top edge */
+.apropos-osk-handle-box {
+    height: 10px;
 }
 
 .apropos-osk-handle {
     width: 108px;
     height: 5px;
-    background-color: rgba(255, 255, 255, 0.5);
+    background-color: rgba(255, 255, 255, 0.16);
     border-radius: 3px;
-    margin: 2px 0;
 }
 
-.apropos-osk-handle:hover {
-    background-color: rgba(255, 255, 255, 0.85);
+.apropos-osk-handle-box:hover .apropos-osk-handle {
+    background-color: rgba(255, 255, 255, 0.32);
 }
 
 .apropos-osk-header-btn {
@@ -377,7 +381,7 @@
 }
 
 .apropos-osk-theme-material .apropos-osk-handle {
-    background-color: rgba(255, 255, 255, 0.35);
+    background-color: rgba(168, 199, 250, 0.22);
 }
 
 .apropos-osk-theme-material .apropos-osk-header-btn {
@@ -475,7 +479,7 @@
 }
 
 .apropos-osk-theme-material.apropos-osk-light .apropos-osk-handle {
-    background-color: rgba(0, 0, 0, 0.3);
+    background-color: rgba(11, 87, 208, 0.16);
 }
 
 .apropos-osk-theme-material.apropos-osk-light .apropos-osk-header-btn {

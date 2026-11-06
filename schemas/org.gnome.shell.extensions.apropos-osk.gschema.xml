@@ -65,6 +65,10 @@
       <default>"it"</default>
       <summary>Keyboard layout: it, us, custom</summary>
     </key>
+    <key name="layout-cycle" type="as">
+      <default>['it', 'us', 'phone', 'custom']</default>
+      <summary>Layouts the header layout button cycles through (it, us, phone, custom)</summary>
+    </key>
     <key name="dock-bottom" type="b">
       <default>true</default>
       <summary>Dock keyboard to bottom of screen</summary>

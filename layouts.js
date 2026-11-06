@@ -181,47 +181,54 @@ Layouts.phone = {
     accents: 'us',
     longPress: true,
     numberRow: [
+        { code: 41, label: '`', shift: '~', hint: '~', longpress: ['~'] },
         N(2, '1', '!', ['¹', '½', '⅓', '¼', '⅛']),
         N(3, '2', '@', ['²', '⅔']),
         N(4, '3', '#', ['³', '¾', '⅜']),
-        N(5, '4', '$', ['⁴', '€', '£', '¥', '¢']),
+        N(5, '4', '$', ['⁴', '¢']),
         N(6, '5', '%', ['‰', '⅝']),
         N(7, '6', '^'),
         N(8, '7', '&', ['⅞']),
-        N(9, '8', '*', ['•', '★']),
+        N(9, '8', '*', ['★']),
         N(10, '9', '('),
-        N(11, '0', ')', ['ⁿ', '∅', '°']),
+        N(11, '0', ')', ['ⁿ', '∅']),
+        { code: 14, label: "⌫", width: 1.0, type: "backspace", special: true },
     ],
-    // Tablet arrangement (iPad / Gboard tablet / physical keyboard): Backspace ends the top letter
-    // row, Enter the home row, so the two are a row apart and offset. Letters are 1 unit in every row.
+    // Gboard tablet arrangement, 12 units per row: Backspace ends the number row, Tab and | frame
+    // the top letter row, Caps Lock and Enter the home row (double-tap Shift also gives Caps Lock). Letter hints follow Gboard, but
+    // no symbol appears twice: anything a key gives with Shift (number row, ` ~, | \) is not
+    // repeated as a hint (except ? on m, kept by choice); the freed keys carry extra symbols.
     mainRows: [
         [
-            L(16, 'q', '%'), L(17, 'w', '^'), L(18, 'e', '~'), L(19, 'r', '|'), L(20, 't', '['),
+            { code: 15, label: "⇥", width: 1.0, type: "tab", hint: "Esc", lpKeys: [{ label: "Esc", code: 1 }] },
+            L(16, 'q', '°'), L(17, 'w', '≠'), L(18, 'e', '±'), L(19, 'r', '='), L(20, 't', '['),
             L(21, 'y', ']'), L(22, 'u', '<'), L(23, 'i', '>'), L(24, 'o', '{'), L(25, 'p', '}'),
-            { code: 14, label: "⌫", width: 1.5, type: "backspace" },
+            // Pipe first (shell), Shift for backslash: the US key is sent with Shift inverted
+            { code: 43, label: '|', shift: '\\', invShift: true },
         ],
         [
-            { type: 'spacer', width: 0.5 },
-            L(30, 'a', '@'), L(31, 's', '#'), L(32, 'd', '&'), L(33, 'f', '*'), L(34, 'g', '-'),
-            L(35, 'h', '+'), L(36, 'j', '='), L(37, 'k', '('), L(38, 'l', ')'),
-            // long-press: keys without a place of their own (terminal use)
-            { code: 28, label: "↵", width: 2.0, type: "enter", hintLeft: "Tab", hint: "Esc", lpKeys: [{ label: "Tab", code: 15 }, { label: "Esc", code: 1 }] },
+            { code: 58, label: "⇪", width: 1.25, type: "caps" },
+            L(30, 'a', '©'), L(31, 's', '€'), L(32, 'd', '£'), L(33, 'f', '_'), L(34, 'g', '¥'),
+            L(35, 'h', '-', ['—', '–']), L(36, 'j', '+'), L(37, 'k', '•'), L(38, 'l', '…'),
+            { code: 28, label: "→", width: 1.75, type: "enter" },
         ],
         [
-            { code: 42, label: "⇧", width: 1.25, type: "shift" },
-            L(44, 'z', '_'), L(45, 'x', '$'), L(46, 'c', '"'), L(47, 'v', "'"), L(48, 'b', ':'),
-            L(49, 'n', ';'), L(50, 'm', '/'),
-            { code: 51, label: ",", shift: ",", hint: ";", longpress: [';', ':', "'", '"', '-', '_', '/', '\\', '`', '~'] },
-            { code: 52, label: ".", shift: ".", hint: "?", longpress: ['?', '!', ',', "'", '"', ':', ';', '-', '@', '#', '…'] },
+            { code: 42, label: "⇧", width: 1.75, type: "shift" },
+            L(44, 'z', '×'), L(45, 'x', '"'), L(46, 'c', "'"), L(47, 'v', ':'), L(48, 'b', ';'),
+            L(49, 'n', '÷'), L(50, 'm', '?'),
+            // hold , = Ctrl+. (emoji chooser in GTK apps); hold . = path / web snippets
+            { code: 51, label: ",", shift: ",", hint: "☺", lpKeys: [{ label: "☺", code: 52, mods: [29] }] },
+            { code: 52, label: ".", shift: ".", hint: "./", longpress: ['./', '../', '~/', '.com'], noAccents: true },
             { code: 54, label: "⇧", width: 1.25, type: "shift" },
         ],
         [
             { code: 29, label: "Ctrl", width: 1.25, type: "ctrl", behavior: "toggle" },
             // Tap = Super (Activities / Super+key combos); hold = sticky Alt latch
-            // long-press ▲/▼: Page Up/Down; with Shift scrolls terminal history
             { code: 125, label: "❖", width: 1.25, type: "super", lpAlt: true, hint: "Alt" },
+            { code: 53, label: "/", shift: "?" },
             // Left/Right: slide on the space bar
-            { code: 57, label: " ", width: 6.5, type: "space" },
+            { code: 57, label: " ", width: 6.0, type: "space" },
+            // long-press ▲/▼: Page Up/Down; with Shift scrolls terminal history
             { code: 103, label: "▲", width: 1.25, type: "arrow", hint: "PgUp", lpKeys: [{ label: "PgUp", code: 104 }, { label: "⇧PgUp", code: 104, shift: true }] },
             { code: 108, label: "▼", width: 1.25, type: "arrow", hint: "PgDn", lpKeys: [{ label: "⇧PgDn", code: 109, shift: true }, { label: "PgDn", code: 109 }], lpDefault: 1 },
         ],

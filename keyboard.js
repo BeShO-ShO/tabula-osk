@@ -6,6 +6,7 @@ import IBus from 'gi://IBus';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as BoxPointer from 'resource:///org/gnome/shell/ui/boxpointer.js';
 import { getIBusManager } from 'resource:///org/gnome/shell/misc/ibusManager.js';
+import { getInputSourceManager } from 'resource:///org/gnome/shell/ui/status/keyboard.js';
 import { Layouts, loadCustomLayout } from './layouts.js';
 import * as TL from './textlogic.js';
 import { SpellChecker } from './spell.js';
@@ -24,8 +25,9 @@ const AC_TERMINATORS = new Set([' ', '.', ',', '!', '?', ';', ':']);
 const TB_ENGINE = 'typing-booster';
 
 class TypingBoosterBridge {
-    constructor(onChange) {
+    constructor(onChange, isOpen = () => false) {
         this._onChange = onChange;
+        this._isOpen = isOpen;
         this._active = false;
         this._weEnabled = false;
         this._cands = [];
@@ -33,16 +35,40 @@ class TypingBoosterBridge {
         this._idleId = 0;
         this._queue = Promise.resolve();
         this._saved = null;
+        this._uiSaved = null;
         this._capCtx = null;
+        this._actualEngine = null;
+        this._engineSigId = 0;
+        this._checkIds = new Set();
     }
 
+    // Started by us, or typing-booster running anyway while the keyboard is open (e.g.
+    // left over from a start that timed out): either way its candidates belong in our bar
     get active() {
-        return this._active;
+        return this._active || this._strayTb();
     }
 
     // Candidates of the current page, best first: [{ text, cb }]
     get candidates() {
         return this._visible ? this._cands : [];
+    }
+
+    // The engine IBus really runs. The Shell's IBusManager drops engine changes while it
+    // is not "ready" and a timed-out switch leaves its name out of date, so follow the bus.
+    _engine() {
+        return this._actualEngine ?? this._mgr?._currentEngineName ?? null;
+    }
+
+    _strayTb() {
+        try {
+            return this._isOpen() && this._engine() === TB_ENGINE;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    _collecting() {
+        return this._active || this._strayTb();
     }
 
     _available() {
@@ -52,6 +78,27 @@ class TypingBoosterBridge {
         } catch (e) {
             return false;
         }
+    }
+
+    // Engine tracking + candidate routing stay installed for the bridge's lifetime and
+    // are gated on _collecting(), so a stale flag can never send candidates to the
+    // Shell's popup next to the text while our keyboard is open.
+    _setup() {
+        if (this._uiSaved)
+            return;
+        const m = getIBusManager();
+        if (!m)
+            return;
+        this._mgr = m;
+        try {
+            if (m._ibus && !this._engineSigId) {
+                this._engineSigId = m._ibus.connect('global-engine-changed', (bus, name) => {
+                    this._actualEngine = name;
+                    this._notify();
+                });
+            }
+        } catch (e) {}
+        this._hookUi();
     }
 
     start() {
@@ -69,23 +116,28 @@ class TypingBoosterBridge {
     async _doStart() {
         if (this._active)
             return;
-        if (!this._available()) {
+        this._setup();
+        if (!this._available())
             return;
-        }
-        const m = getIBusManager();
-        this._mgr = m;
+        const m = this._mgr;
         this._active = true;
         try {
             this._hook();
-            const cur = m._currentEngineName || '';
-            if (cur !== TB_ENGINE) {
-                // Only possible on xkb sources; CJK and other IBus engines are left alone
-                const ok = await m.setCompletionEnabled(true);
-                if (!ok) {
-                    this._active = false;
-                    this._unhook();
-                    this._notify();
-                    return;
+            if (this._engine() === TB_ENGINE) {
+                // Already running (a start that timed out and came up late): adopt it, so
+                // stop() switches back to the keyboard layout's engine
+                this._weEnabled = true;
+            } else {
+                const cur = m._currentEngineName || '';
+                if (cur !== TB_ENGINE) {
+                    // Only possible on xkb sources; CJK and other IBus engines are left alone
+                    const ok = await m.setCompletionEnabled(true);
+                    if (!ok) {
+                        this._active = false;
+                        this._unhook();
+                        this._notify();
+                        return;
+                    }
                 }
                 this._weEnabled = true;
             }
@@ -106,12 +158,30 @@ class TypingBoosterBridge {
             this._weEnabled = true;
             console.warn('[AproposOSK] typing-booster slow to start, continuing');
         }
+        // GNOME 51 swallows that timeout and falls back to plain xkb: check that
+        // typing-booster really runs and ask again if not
+        this._check(2500, () => this._ensureStarted());
+        this._check(7000, () => this._ensureStarted());
         this._notify();
     }
 
-    async _doStop() {
-        if (!this._active)
+    _ensureStarted() {
+        if (!this._active || !this._isOpen())
             return;
+        const eng = this._engine();
+        if (eng === TB_ENGINE)
+            return;
+        try {
+            this._mgr._setEngine(TB_ENGINE).catch(() => {});
+        } catch (e) {}
+    }
+
+    async _doStop() {
+        if (!this._active) {
+            // Nothing of ours, but typing-booster may still be running (stray)
+            this._check(300, () => this._ensureStopped());
+            return;
+        }
         this._active = false;
         this._cands = [];
         this._visible = false;
@@ -127,7 +197,35 @@ class TypingBoosterBridge {
         try {
             Main.inputMethod.update();
         } catch (e) {}
+        this._check(400, () => this._ensureStopped());
         this._notify();
+    }
+
+    // Keyboard closed but typing-booster still the engine: switch back to the current
+    // input source's engine (what the Shell itself does when a source is activated)
+    _ensureStopped() {
+        if (this._active || this._isOpen() || this._engine() !== TB_ENGINE)
+            return;
+        try {
+            if (this._mgr?._oskCompletion)
+                return;   // the stock keyboard turned completion on itself
+            const ism = getInputSourceManager();
+            const src = ism?.currentSource;
+            if (!src || src.type === 'ibus' && src.id === TB_ENGINE)
+                return;   // typing-booster is the user's own input source
+            ism.activateInputSource(src, false);
+        } catch (e) {}
+    }
+
+    _check(ms, fn) {
+        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
+            this._checkIds.delete(id);
+            try {
+                fn();
+            } catch (e) {}
+            return GLib.SOURCE_REMOVE;
+        });
+        this._checkIds.add(id);
     }
 
     _notify() {
@@ -142,33 +240,43 @@ class TypingBoosterBridge {
         });
     }
 
-    // ---- hooks (instance overrides, removed again in _unhook) -----------
-    _override(obj, name, fn) {
+    // ---- hooks (instance overrides, removed again in _unhookUi/_unhook) ----
+    _override(list, obj, name, fn) {
         const own = Object.prototype.hasOwnProperty.call(obj, name);
-        this._saved.push({ obj, name, own, value: obj[name] });
+        list.push({ obj, name, own, value: obj[name] });
         obj[name] = fn;
     }
 
-    _hook() {
-        this._unhook();
-        this._saved = [];
+    _restore(list) {
+        for (const s of (list ?? []).reverse()) {
+            try {
+                if (s.own)
+                    s.obj[s.name] = s.value;
+                else
+                    delete s.obj[s.name];
+            } catch (e) {}
+        }
+    }
+
+    _hookUi() {
+        this._uiSaved = [];
         const self = this;
         const kb = Main.keyboard;
         const origAdd = kb.addSuggestion;
         const origReset = kb.resetSuggestions;
         const origVis = kb.setSuggestionsVisible;
-        this._override(kb, 'addSuggestion', function (text, cb) {
+        this._override(this._uiSaved, kb, 'addSuggestion', function (text, cb) {
             try {
-                if (self._active) {
+                if (self._collecting()) {
                     self._cands.push({ text: String(text ?? ''), cb });
                     self._notify();
                 }
             } catch (e) {}
             return origAdd.call(this, text, cb);
         });
-        this._override(kb, 'resetSuggestions', function () {
+        this._override(this._uiSaved, kb, 'resetSuggestions', function () {
             try {
-                if (self._active) {
+                if (self._collecting()) {
                     self._cands = [];
                     self._hookCaps();
                     self._notify();
@@ -176,9 +284,9 @@ class TypingBoosterBridge {
             } catch (e) {}
             return origReset.call(this);
         });
-        this._override(kb, 'setSuggestionsVisible', function (visible) {
+        this._override(this._uiSaved, kb, 'setSuggestionsVisible', function (visible) {
             try {
-                if (self._active) {
+                if (self._collecting()) {
                     self._visible = !!visible;
                     self._notify();
                 }
@@ -186,20 +294,29 @@ class TypingBoosterBridge {
             return origVis.call(this, visible);
         });
 
-        // Keep the Shell's floating candidate popup closed while our bar shows typing-booster
+        // Keep the Shell's floating candidate popup closed while our bar shows the candidates
         const popup = this._mgr && this._mgr._candidatePopup;
         if (popup && typeof popup._updateVisibility === 'function') {
             const origUpd = popup._updateVisibility;
-            this._override(popup, '_updateVisibility', function () {
+            this._override(this._uiSaved, popup, '_updateVisibility', function () {
+                let ours = false;
                 try {
-                    if (self._active && self._mgr._currentEngineName === TB_ENGINE) {
-                        this.close(BoxPointer.PopupAnimation.NONE);
-                        return;
-                    }
+                    ours = self._collecting();
                 } catch (e) {}
+                if (ours) {
+                    try {
+                        this.close(BoxPointer.PopupAnimation.NONE);
+                    } catch (e) {}
+                    return;
+                }
                 return origUpd.call(this);
             });
         }
+    }
+
+    _hook() {
+        this._unhook();
+        this._saved = [];
         this._hookCaps();
     }
 
@@ -235,16 +352,7 @@ class TypingBoosterBridge {
 
     _unhook() {
         this._unhookCaps();
-        if (this._saved) {
-            for (const s of this._saved.reverse()) {
-                try {
-                    if (s.own)
-                        s.obj[s.name] = s.value;
-                    else
-                        delete s.obj[s.name];
-                } catch (e) {}
-            }
-        }
+        this._restore(this._saved);
         this._saved = null;
     }
 
@@ -253,12 +361,24 @@ class TypingBoosterBridge {
             GLib.source_remove(this._idleId);
             this._idleId = 0;
         }
+        for (const id of this._checkIds)
+            GLib.source_remove(id);
+        this._checkIds.clear();
         this._onChange = () => {};
+        this._isOpen = () => false;
         // Synchronous part of stop: never leave our overrides behind
         const wasEnabled = this._weEnabled;
         this._active = false;
         this._weEnabled = false;
         this._unhook();
+        this._restore(this._uiSaved);
+        this._uiSaved = null;
+        if (this._engineSigId && this._mgr?._ibus) {
+            try {
+                this._mgr._ibus.disconnect(this._engineSigId);
+            } catch (e) {}
+        }
+        this._engineSigId = 0;
         if (wasEnabled && this._mgr) {
             this._mgr.setCompletionEnabled(false).catch(() => {});
             try {
@@ -404,6 +524,12 @@ export class AproposKeyboard {
 
         this.actor.connect('event', (actor, event) => {
             const type = event.type();
+            // Keys stop their own events, so a press arriving here hit empty space
+            if (type === Clutter.EventType.TOUCH_BEGIN ||
+                (type === Clutter.EventType.BUTTON_PRESS && event.get_button() === 1)) {
+                if (!this._activeGesture && this._deadZonePress(event))
+                    return Clutter.EVENT_STOP;
+            }
             if (type === Clutter.EventType.BUTTON_RELEASE || type === Clutter.EventType.TOUCH_END) {
                 if (!this._activeGesture && (this._spaceDrifting || this._backspaceSwiping)) {
                     this._resetGestureStates();
@@ -428,20 +554,34 @@ export class AproposKeyboard {
     }
 
     _buildHeader() {
-        // The header is an overlay: the button row fills it, and the resize bar sits on top,
-        // centred on the whole header (so it is centred on the screen)
-        this._header = new St.Widget({
+        // Move/resize grip: a thin coloured strip across the top edge. The reactive area is
+        // a little taller than the visible strip so it is still easy to grab by touch.
+        this._handleBox = new St.Bin({
+            style_class: 'apropos-osk-handle-box',
+            track_hover: true,
+            x_expand: true,
+            y_expand: false,
+            reactive: true,
+            can_focus: false,
+        });
+        this._dragHandle = new St.Widget({
+            style_class: 'apropos-osk-handle',
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.START,
+        });
+        this._handleBox.set_child(this._dragHandle);
+        this._setupDragging(this._handleBox);
+        this.actor.add_child(this._handleBox);
+
+        // Header row: [layout] [suggestions ...] [Cfg Dock Norm X]
+        // (_buildSuggestBar puts the suggestion bar between the two button groups)
+        this._header = new St.BoxLayout({
             style_class: 'apropos-osk-header',
-            layout_manager: new Clutter.BinLayout(),
+            orientation: Clutter.Orientation.HORIZONTAL,
             x_expand: true,
             y_expand: false,
         });
-        this._headerRow = new St.BoxLayout({
-            orientation: Clutter.Orientation.HORIZONTAL,
-            x_expand: true,
-            y_expand: true,
-        });
-        this._header.add_child(this._headerRow);
+        this._headerRow = this._header;
 
         // Left: Layout switch button
         this._layoutLabel = new St.Button({
@@ -454,25 +594,9 @@ export class AproposKeyboard {
         this._layoutLabel.connect('clicked', () => this._toggleLayout());
         this._headerRow.add_child(this._layoutLabel);
 
-        // Maniglia trascinamento
-        const handleBox = new St.BoxLayout({
-            x_expand: true,
-            x_align: Clutter.ActorAlign.CENTER,
-            y_align: Clutter.ActorAlign.CENTER,
-            reactive: true,
-            can_focus: false,
-            style: 'min-height: 26px; padding: 2px 20px;',
-        });
-        this._dragHandle = new St.Widget({
-            style_class: 'apropos-osk-handle',
-            reactive: true,
-        });
-        handleBox.add_child(this._dragHandle);
-        this._setupDragging(handleBox);
-        handleBox.set_x_expand(true);
-        handleBox.set_y_expand(true);
-        this._headerRow.add_child(new St.Widget({ x_expand: true }));
-        this._header.add_child(handleBox);
+        // Fills the middle when the suggestion bar is hidden (suggestions off)
+        this._headerSpacer = new St.Widget({ x_expand: true });
+        this._headerRow.add_child(this._headerSpacer);
 
         // Pulsanti intestazione destra
         const rightBtns = new St.BoxLayout({
@@ -1033,7 +1157,8 @@ export class AproposKeyboard {
             // Special keys (Tab, Esc...) offered on long-press: popup shows their names
             btn._longpress = keyDef.lpKeys.map(k => k.label);
             btn._lpCodes = new Map(keyDef.lpKeys.map(k => [k.label, k.code]));
-            btn._lpShift = new Set(keyDef.lpKeys.filter(k => k.shift).map(k => k.label));
+            // Modifiers held around the key: `mods: [codes]`, or `shift: true` for [42]
+            btn._lpMods = new Map(keyDef.lpKeys.map(k => [k.label, k.mods ?? (k.shift ? [42] : [])]));
             // Entry highlighted when the popup opens (index into lpKeys, default the first)
             btn._lpDefault = Number.isInteger(keyDef.lpDefault) ? keyDef.lpDefault : 0;
             if (keyDef.hint)
@@ -1050,7 +1175,9 @@ export class AproposKeyboard {
                 items.push(c);
         };
         (keyDef.longpress || []).forEach(add);
-        (this._accentsFor(layout.accents).get(keyDef.label) || []).forEach(add);
+        // `noAccents: true`: only the key's own list (no symbols from GNOME's layout data)
+        if (!keyDef.noAccents)
+            (this._accentsFor(layout.accents).get(keyDef.label) || []).forEach(add);
         if (items.length === 0)
             return;
         btn._longpress = items;
@@ -1243,7 +1370,7 @@ export class AproposKeyboard {
         btn._keyDef = keyDef;
         this._keyActors.push(btn);
 
-        if (isNumberRow && indexInRow >= 1 && indexInRow <= 12) {
+        if (isNumberRow && indexInRow >= 1 && indexInRow <= 12 && !keyDef.type) {
             btn._isFnNumberKey = true;
             btn._fnLabel = 'F' + indexInRow;
             btn._fnCode = (indexInRow <= 10) ? (58 + indexInRow) : (indexInRow === 11 ? 87 : 88);
@@ -1257,7 +1384,7 @@ export class AproposKeyboard {
             if (this.fnActive) {
                 btn.add_style_class_name('apropos-osk-key-active');
             }
-        } else if (['mod', 'ctrl', 'alt', 'super'].includes(keyDef.type)) {
+        } else if (['mod', 'ctrl', 'alt', 'super', 'tab'].includes(keyDef.type)) {
             btn.add_style_class_name('apropos-osk-key-mod');
         } else if (keyDef.type === 'enter') {
             // Invio rettangolare fallback (ANSI)
@@ -1271,6 +1398,9 @@ export class AproposKeyboard {
         } else if (keyDef.type === 'backspace') {
             this._backspaceButton = btn;
         }
+        // `special: true`: drawn like the modifier keys (e.g. Backspace on the Tablet layout)
+        if (keyDef.special)
+            btn.add_style_class_name('apropos-osk-key-mod');
 
         if (keyDef.type === 'shift') {
             btn.add_style_class_name('apropos-osk-key-mod');
@@ -1307,7 +1437,8 @@ export class AproposKeyboard {
     }
 
     _setupKeyEvents(btn, keyDef) {
-        btn.connect('event', (actor, event) => {
+        // Kept on the button so a tap in the empty space around keys can be handed to it
+        btn._oskOnEvent = (actor, event) => {
             const type = event.type();
 
             if (this._activeGesture && this._gestureBtn !== btn) {
@@ -1338,7 +1469,108 @@ export class AproposKeyboard {
                 return Clutter.EVENT_PROPAGATE;
             }
             return Clutter.EVENT_PROPAGATE;
-        });
+        };
+        btn.connect('event', btn._oskOnEvent);
+    }
+
+    // ------------------------------------------------------------------
+    // Dead zones: a tap in the empty space of the key area (padding below the bottom
+    // row, gaps between keys, side padding, half-key indents) goes to the nearest key,
+    // like Gboard. Header, suggestions and resize handle are not part of it.
+    // ------------------------------------------------------------------
+    _deadZoneKey(x, y) {
+        if (!this._keysBox || !this.isOpen)
+            return null;
+        const [, ky] = this._keysBox.get_transformed_position();
+        const [ax, ay] = this.actor.get_transformed_position();
+        const [aw, ah] = this.actor.get_transformed_size();
+        if (y < ky - 2 || y > ay + ah || x < ax || x > ax + aw)
+            return null;
+        const MAX = 30;
+        let best = null, bestD = Infinity;
+        for (const k of this._keyActors) {
+            if (!k || !k.visible || !k.mapped || k._isSpacer || k._isEnterPlaceholder)
+                continue;
+            const [kx, kyy] = k.get_transformed_position();
+            const [kw, kh] = k.get_transformed_size();
+            const dx = x < kx ? kx - x : (x > kx + kw ? x - (kx + kw) : 0);
+            const dy = y < kyy ? kyy - y : (y > kyy + kh ? y - (kyy + kh) : 0);
+            const d = Math.hypot(dx, dy);
+            if (d < bestD) {
+                bestD = d;
+                best = k;
+            }
+        }
+        // ISO Enter (drawn shape with its own hit test) is never a target: a tap near it
+        // does nothing rather than risk the wrong key
+        if (!best || bestD > MAX || !best._oskOnEvent)
+            return null;
+        return best;
+    }
+
+    _deadZonePress(event) {
+        const [x, y] = event.get_coords();
+        const btn = this._deadZoneKey(x, y);
+        if (!btn)
+            return false;
+        const seq = (typeof event.get_event_sequence === 'function') ? event.get_event_sequence() : null;
+        const slot = (seq && typeof seq.get_slot === 'function') ? seq.get_slot() : null;
+        const isTouch = event.type() === Clutter.EventType.TOUCH_BEGIN;
+        const id = isTouch ? `t${slot ?? 'x'}` : 'm';
+        this._deadZoneDrop(id);
+        btn._oskOnEvent(btn, event);
+        // Follow this touch/click until it ends and hand motion and release to the key.
+        // A gesture the key started (space slide, backspace swipe, long-press) captures
+        // the stage before this handler, so it then runs as usual.
+        const entry = { btn, seq, slot, isTouch, stageId: 0 };
+        entry.stageId = global.stage.connect('captured-event', (stage, ev) => this._deadZoneEvent(id, entry, ev));
+        this._deadZones ??= new Map();
+        this._deadZones.set(id, entry);
+        return true;
+    }
+
+    _deadZoneEvent(id, entry, ev) {
+        const T = Clutter.EventType;
+        const type = ev.type();
+        // The key's own gesture already took the release
+        if (!entry.btn._down && !(this._activeGesture && this._gestureBtn === entry.btn)) {
+            this._deadZoneDrop(id);
+            return Clutter.EVENT_PROPAGATE;
+        }
+        if (this._activeGesture)
+            return Clutter.EVENT_PROPAGATE;
+        let mine = false;
+        if (entry.isTouch) {
+            if (type === T.TOUCH_UPDATE || type === T.TOUCH_END || type === T.TOUCH_CANCEL) {
+                const seq = (typeof ev.get_event_sequence === 'function') ? ev.get_event_sequence() : null;
+                const slot = (seq && typeof seq.get_slot === 'function') ? seq.get_slot() : null;
+                mine = (entry.slot !== null && slot !== null) ? slot === entry.slot : seq === entry.seq;
+            }
+        } else {
+            mine = type === T.MOTION || type === T.BUTTON_RELEASE;
+        }
+        if (!mine)
+            return Clutter.EVENT_PROPAGATE;
+        const end = type === T.TOUCH_END || type === T.TOUCH_CANCEL || type === T.BUTTON_RELEASE;
+        if (end)
+            this._deadZoneDrop(id);
+        entry.btn._oskOnEvent(entry.btn, ev);
+        return end ? Clutter.EVENT_STOP : Clutter.EVENT_PROPAGATE;
+    }
+
+    _deadZoneDrop(id) {
+        const e = this._deadZones?.get(id);
+        if (!e)
+            return;
+        if (e.stageId)
+            global.stage.disconnect(e.stageId);
+        e.stageId = 0;
+        this._deadZones.delete(id);
+    }
+
+    _deadZoneDropAll() {
+        for (const id of [...(this._deadZones?.keys() ?? [])])
+            this._deadZoneDrop(id);
     }
 
     _playSound() {
@@ -1620,7 +1852,11 @@ export class AproposKeyboard {
     }
 
     _pressRegular(keyDef) {
-        if (this.shiftActive && (!this._autoShift || this._isLetterDef(keyDef))) {
+        let shift = this.shiftActive && (!this._autoShift || this._isLetterDef(keyDef));
+        // `invShift`: the key's own symbol is the shifted one of its key code (| on the \ key)
+        if (keyDef.invShift)
+            shift = !shift;
+        if (shift) {
             this._input.pressKey(this._activeShiftCode || 42);
             this._shiftSent = true;
         }
@@ -1873,9 +2109,9 @@ export class AproposKeyboard {
                 if (code) {
                     this._keySeq++;
                     this._tsUnknown();
-                    const sh = btn._lpShift && btn._lpShift.has(choice);
-                    if (sh)
-                        this._input.tapCombo([42], code);
+                    const mods = btn._lpMods?.get(choice) ?? [];
+                    if (mods.length)
+                        this._input.tapCombo(mods, code);
                     else
                         this._input.tapKey(code);
                 } else if (choice) {
@@ -2360,10 +2596,21 @@ export class AproposKeyboard {
     }
 
     _toggleLayout() {
-        const sequence = ['it', 'us', 'phone', 'custom'];
-        let idx = sequence.indexOf(this._currentLayoutKey);
-        if (idx === -1) idx = 0;
-        const nextKey = sequence[(idx + 1) % sequence.length];
+        // Only the layouts chosen in Preferences, in their fixed order
+        const all = ['it', 'us', 'phone', 'custom'];
+        let chosen = [];
+        try {
+            if (this._hasKey('layout-cycle'))
+                chosen = this._settings.get_strv('layout-cycle');
+        } catch (e) {}
+        let sequence = all.filter(k => chosen.includes(k));
+        if (sequence.length === 0)
+            sequence = all;
+        const idx = sequence.indexOf(this._currentLayoutKey);
+        // Current layout not in the list: go to the first chosen one
+        const nextKey = idx === -1 ? sequence[0] : sequence[(idx + 1) % sequence.length];
+        if (nextKey === this._currentLayoutKey)
+            return;
 
         this._currentLayoutKey = nextKey;
         this._settings.set_string('layout-variant', this._currentLayoutKey);
@@ -2416,63 +2663,129 @@ export class AproposKeyboard {
         let actorStartY = 0;
         let startPct = 0;
         let lastPct = 0;
+        let isTouch = false;
+        let slot = null;
+        let seq = null;
 
-        handle.connect('event', (actor, event) => {
-            const type = event.type();
+        const seqOf = ev => {
+            const sq = (typeof ev.get_event_sequence === 'function') ? ev.get_event_sequence() : null;
+            const sl = (sq && typeof sq.get_slot === 'function') ? sq.get_slot() : null;
+            return [sq, sl];
+        };
 
-            if (type === Clutter.EventType.BUTTON_PRESS || type === Clutter.EventType.TOUCH_BEGIN) {
-                const [x, y] = event.get_coords();
-                dragStartX = x;
-                dragStartY = y;
-                if (this._isDocked) {
-                    // Docked: dragging the bar up/down resizes the keyboard height
-                    const monitor = Main.layoutManager.primaryMonitor;
-                    if (!monitor) return Clutter.EVENT_PROPAGATE;
-                    isResizing = true;
-                    startPct = this._getHeightPercent(monitor);
-                    lastPct = startPct;
-                    return Clutter.EVENT_STOP;
+        const onMotion = ev => {
+            const [x, y] = ev.get_coords();
+            if (isResizing) {
+                const monitor = Main.layoutManager.primaryMonitor;
+                if (!monitor)
+                    return;
+                let pct = Math.round(startPct + ((dragStartY - y) / monitor.height) * 100);
+                pct = Math.max(MIN_PCT, Math.min(MAX_PCT, pct));
+                if (pct !== lastPct) {
+                    lastPct = pct;
+                    this._heightOverride = pct;
+                    this._applyGeometry();
                 }
+            } else if (isDragging) {
+                const mon = Main.layoutManager.primaryMonitor;
+                const newX = Math.max(0, Math.min(mon.width - this.actor.width, actorStartX + (x - dragStartX)));
+                const newY = Math.max(30, Math.min(mon.height - this.actor.height, actorStartY + (y - dragStartY)));
+                this.actor.set_position(newX, newY);
+            }
+        };
+
+        // Ends the drag wherever the finger or mouse button is lifted. Before, only a
+        // release over the (thin) bar ended it, and a missed release left a temporary
+        // height override in place that made later height changes do nothing.
+        const finish = commit => {
+            if (this._dragStageId) {
+                global.stage.disconnect(this._dragStageId);
+                this._dragStageId = 0;
+            }
+            this._dragFinish = null;
+            if (isResizing) {
+                isResizing = false;
+                if (commit)
+                    this._commitHeight(lastPct);
+                else {
+                    this._heightOverride = null;
+                    this._applyGeometry();
+                }
+            }
+            isDragging = false;
+        };
+
+        const onCaptured = ev => {
+            const T = Clutter.EventType;
+            const type = ev.type();
+            if (isTouch) {
+                if (type !== T.TOUCH_UPDATE && type !== T.TOUCH_END && type !== T.TOUCH_CANCEL)
+                    return Clutter.EVENT_PROPAGATE;
+                const [sq, sl] = seqOf(ev);
+                const same = (slot !== null && sl !== null) ? sl === slot : sq === seq;
+                if (!same)
+                    return Clutter.EVENT_PROPAGATE;
+                if (type === T.TOUCH_UPDATE)
+                    onMotion(ev);
+                else
+                    finish(type === T.TOUCH_END);
+                return Clutter.EVENT_STOP;
+            }
+            if (type === T.MOTION) {
+                const state = (typeof ev.get_state === 'function') ? ev.get_state() : 0;
+                if ((state & Clutter.ModifierType.BUTTON1_MASK) === 0) {
+                    finish(true);   // button already up (release went elsewhere)
+                    return Clutter.EVENT_PROPAGATE;
+                }
+                onMotion(ev);
+                return Clutter.EVENT_STOP;
+            }
+            if (type === T.BUTTON_RELEASE) {
+                finish(true);
+                return Clutter.EVENT_STOP;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        };
+
+        this._onHandleEvent = (actor, event) => {
+            const type = event.type();
+            if (type !== Clutter.EventType.BUTTON_PRESS && type !== Clutter.EventType.TOUCH_BEGIN)
+                return Clutter.EVENT_PROPAGATE;
+            if (this._dragFinish)
+                this._dragFinish(true);
+            const [x, y] = event.get_coords();
+            dragStartX = x;
+            dragStartY = y;
+            isTouch = type === Clutter.EventType.TOUCH_BEGIN;
+            [seq, slot] = seqOf(event);
+            if (this._isDocked) {
+                // Docked: dragging the bar up/down resizes the keyboard height
+                const monitor = Main.layoutManager.primaryMonitor;
+                if (!monitor)
+                    return Clutter.EVENT_PROPAGATE;
+                isResizing = true;
+                startPct = this._getHeightPercent(monitor);
+                lastPct = startPct;
+            } else {
                 // Floating: dragging the bar moves the keyboard
                 isDragging = true;
                 const [ax, ay] = this.actor.get_position();
                 actorStartX = ax;
                 actorStartY = ay;
-                return Clutter.EVENT_STOP;
-            } else if (type === Clutter.EventType.MOTION || type === Clutter.EventType.TOUCH_UPDATE) {
-                if (isResizing) {
-                    const monitor = Main.layoutManager.primaryMonitor;
-                    const [, y] = event.get_coords();
-                    let pct = Math.round(startPct + ((dragStartY - y) / monitor.height) * 100);
-                    pct = Math.max(MIN_PCT, Math.min(MAX_PCT, pct));
-                    if (pct !== lastPct) {
-                        lastPct = pct;
-                        this._heightOverride = pct;
-                        this._applyGeometry();
-                    }
-                    return Clutter.EVENT_STOP;
-                }
-                if (isDragging) {
-                    const [x, y] = event.get_coords();
-                    const newX = Math.max(0, Math.min(Main.layoutManager.primaryMonitor.width - this.actor.width, actorStartX + (x - dragStartX)));
-                    const newY = Math.max(30, Math.min(Main.layoutManager.primaryMonitor.height - this.actor.height, actorStartY + (y - dragStartY)));
-                    this.actor.set_position(newX, newY);
-                    return Clutter.EVENT_STOP;
-                }
-            } else if (type === Clutter.EventType.BUTTON_RELEASE || type === Clutter.EventType.TOUCH_END ||
-                       type === Clutter.EventType.TOUCH_CANCEL) {
-                if (isResizing) {
-                    isResizing = false;
-                    this._commitHeight(lastPct);
-                    return Clutter.EVENT_STOP;
-                }
-                if (isDragging) {
-                    isDragging = false;
-                    return Clutter.EVENT_STOP;
-                }
             }
-            return Clutter.EVENT_PROPAGATE;
-        });
+            this._dragFinish = finish;
+            this._dragStageId = global.stage.connect('captured-event', (stage, ev) => onCaptured(ev));
+            this._onHandleCaptured = onCaptured;
+            return Clutter.EVENT_STOP;
+        };
+        handle.connect('event', this._onHandleEvent);
+    }
+
+    // Close/destroy in the middle of a drag: keep what was dragged so far
+    _endHandleDrag() {
+        if (this._dragFinish)
+            this._dragFinish(true);
+        this._heightOverride = null;
     }
 
     _updateStruts() {
@@ -2519,12 +2832,13 @@ export class AproposKeyboard {
         const containerPadH = 24;
         let availableW = targetW - containerPadH;
 
-        // Altezza intestazione
-        const headerHeight = 32;
+        // Resize strip (10) + header row (34 + 2 margin); the suggestions share the header row
+        const handleHeight = 10;
+        const headerHeight = 36;
         // Padding verticale contenitore
-        const containerPadV = 6 + paddingBottom;
+        const containerPadV = 2 + paddingBottom;
         const suggestH = this._tsBarHeight();
-        const nonKeyH = headerHeight + suggestH + containerPadV + numGap + ((numRows - 1) * gapY);
+        const nonKeyH = handleHeight + headerHeight + containerPadV + numGap + ((numRows - 1) * gapY);
 
         const reqH = Math.round(monitor.height * (heightPercent / 100));
         let keyHeight = Math.floor((reqH - nonKeyH) / numRows);
@@ -2565,14 +2879,17 @@ export class AproposKeyboard {
             this._keysBox.set_x_align(Clutter.ActorAlign.CENTER);
             this._header.set_width(normalW);
             this._header.set_x_align(Clutter.ActorAlign.CENTER);
-            this._tsSizeBar(suggestH, normalW);
+            this._handleBox.set_width(normalW);
+            this._handleBox.set_x_align(Clutter.ActorAlign.CENTER);
         } else {
             this._keysBox.set_width(-1);
             this._keysBox.set_x_align(Clutter.ActorAlign.FILL);
             this._header.set_width(-1);
             this._header.set_x_align(Clutter.ActorAlign.FILL);
-            this._tsSizeBar(suggestH, -1);
+            this._handleBox.set_width(-1);
+            this._handleBox.set_x_align(Clutter.ActorAlign.FILL);
         }
+        this._tsSizeBar(suggestH);
 
         // Font ad alta leggibilita (default) o personalizzato
         this._fontFamilyCss = this._computeFontFamily();
@@ -2701,7 +3018,7 @@ export class AproposKeyboard {
         this._nwInit();
         this._tbShown = [];
         try {
-            this._tbBridge = new TypingBoosterBridge(() => this._tsRefresh());
+            this._tbBridge = new TypingBoosterBridge(() => this._tsRefresh(), () => this.isOpen);
             this._tbSettingIds = ['use-typing-booster', 'suggestions-enabled']
                 .filter(k => this._hasKey(k))
                 .map(k => this._settings.connect(`changed::${k}`, () => this._tbSync()));
@@ -2842,7 +3159,7 @@ export class AproposKeyboard {
             style_class: 'apropos-osk-suggest-bar',
             orientation: Clutter.Orientation.HORIZONTAL,
             x_expand: true,
-            y_expand: false,
+            y_expand: true,
         });
         this._suggestBtns = [];
         // Slots left..right -> candidate rank (0 = best).
@@ -2896,17 +3213,17 @@ export class AproposKeyboard {
         if (!this._tsReady)
             this._tsInit();
         this._tsBuildBarWidgets();
-        this.actor.add_child(this._suggestBar);
+        // Lives in the header row, between the layout button and the right-hand buttons
+        this._header.insert_child_above(this._suggestBar, this._layoutLabel);
     }
 
-    _tsSizeBar(h, w) {
+    _tsSizeBar(h) {
         const bar = this._suggestBar;
         if (!bar)
             return;
         bar.visible = h > 0;
-        bar.set_height(h > 0 ? h : -1);
-        bar.set_width(w);
-        bar.set_x_align(w > 0 ? Clutter.ActorAlign.CENTER : Clutter.ActorAlign.FILL);
+        if (this._headerSpacer)
+            this._headerSpacer.visible = !bar.visible;
         this._tsRefresh();
     }
 
@@ -3591,9 +3908,9 @@ export class AproposKeyboard {
             if (!def || !def.code)
                 continue;
             if (def.label === ch)
-                return { code: def.code, shift: isLetter && this.capsActive };
+                return { code: def.code, shift: (isLetter && this.capsActive) !== !!def.invShift };
             if (def.shift === ch)
-                return { code: def.code, shift: !(isLetter && this.capsActive) };
+                return { code: def.code, shift: !(isLetter && this.capsActive) !== !!def.invShift };
         }
         return null;
     }
@@ -4196,7 +4513,8 @@ export class AproposKeyboard {
             return;
         }
 
-        const radius = btn._baseRadius || 8;
+        // `pill: true` (Gboard tablet Enter): fully rounded ends
+        const radius = def.pill && btn._keyH ? Math.floor(btn._keyH / 2) : (btn._baseRadius || 8);
         const family = this._fontFamilyCss || this._computeFontFamily();
         const fontSize = this._fontSizeFor(btn);
 
@@ -4384,6 +4702,8 @@ export class AproposKeyboard {
     }
 
     close() {
+        this._endHandleDrag();
+        this._deadZoneDropAll();
         this._resetGestureStates();
         this._stopKeyRepeat();
         this._input.releaseAll();
@@ -4473,6 +4793,8 @@ export class AproposKeyboard {
         }
         this._nwUnhookIm();
         this._tsDestroy();
+        this._endHandleDrag();
+        this._deadZoneDropAll();
         this._cleanupStageGesture();
         this._stopKeyRepeat();
         this._superLpCancel();

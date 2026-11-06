@@ -175,7 +175,7 @@ export default class AproposOskPreferences extends ExtensionPreferences {
         // Group 2: Dimensioni
         const dimGroup = new Adw.PreferencesGroup({
             title: _('Size'),
-            description: _('Adjust the width and height taken up by the keyboard'),
+            description: _('Adjust the width of the keyboard. To change its height, drag the bar at the top of the docked keyboard'),
         });
         page1.add(dimGroup);
 
@@ -203,6 +203,45 @@ export default class AproposOskPreferences extends ExtensionPreferences {
         settings.connect('changed::layout-variant', syncLayoutRow);
         dimGroup.add(layoutRow);
 
+        // Which layouts the [layout] button in the keyboard header cycles through
+        const cycleRow = new Adw.ExpanderRow({
+            title: _('Layouts in the header toggle'),
+            subtitle: _('Tapping the layout name at the top left switches between these'),
+        });
+        const cycleNames = ['Italian (Compact TKL)', 'English (US TKL)', 'Tablet (US, Gboard style)', 'Custom Layout'];
+        const cycleSwitches = layoutKeys.map((key, i) => {
+            const row = new Adw.SwitchRow({ title: _(cycleNames[i]) });
+            cycleRow.add_row(row);
+            return row;
+        });
+        let cycleSyncing = false;
+        const syncCycle = () => {
+            cycleSyncing = true;
+            const chosen = settings.get_strv('layout-cycle');
+            cycleSwitches.forEach((row, i) => {
+                row.active = chosen.includes(layoutKeys[i]);
+            });
+            const n = cycleSwitches.filter(r => r.active).length;
+            // The last layout left on cannot be switched off
+            cycleSwitches.forEach(row => {
+                row.sensitive = !(row.active && n === 1);
+            });
+            cycleSyncing = false;
+        };
+        syncCycle();
+        cycleSwitches.forEach(row => row.connect('notify::active', () => {
+            if (cycleSyncing)
+                return;
+            const chosen = layoutKeys.filter((k, i) => cycleSwitches[i].active);
+            if (chosen.length === 0) {
+                syncCycle();
+                return;
+            }
+            settings.set_strv('layout-cycle', chosen);
+        }));
+        settings.connect('changed::layout-cycle', syncCycle);
+        dimGroup.add(cycleRow);
+
         // Key style
         const themeRow = new Adw.ComboRow({
             title: _('Key style'),
@@ -229,18 +268,8 @@ export default class AproposOskPreferences extends ExtensionPreferences {
         bindIntToSpinRow(settings, 'width-percent', widthRow);
         dimGroup.add(widthRow);
 
-        // Height Percent
-        const heightRow = new Adw.SpinRow({
-            title: _('Keyboard height (%)'),
-            subtitle: _('Percentage of screen height'),
-            adjustment: new Gtk.Adjustment({
-                lower: 20,
-                upper: 55,
-                step_increment: 2,
-            }),
-        });
-        bindIntToSpinRow(settings, 'height-percent', heightRow);
-        dimGroup.add(heightRow);
+        // Height: set by dragging the bar at the top of the docked keyboard (stored
+        // separately for landscape and portrait), so there is no field for it here
 
         // Group: Leggibilità del testo
         const readGroup = new Adw.PreferencesGroup({
