@@ -141,7 +141,7 @@ The sensitivity of both gestures can be set in pixels per character.
   Labels shrink only when they do not fit in the key.
 
 ### Layout editor
-The settings window has a visual editor for a custom layout (*Look → Layout Studio*):
+The settings window has a visual editor for a custom layout (*Layout → Layout Studio*):
 * An interactive preview. Click a key to edit it.
 * For each key: its label, its Shift, AltGr and Shift+AltGr characters, its width, its Linux keycode, its color, and whether it is a normal key or a switch.
 * Add or remove keys (a deleted key can be brought back with *Undo*) and move keys between rows.
