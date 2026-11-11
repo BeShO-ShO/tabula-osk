@@ -19,19 +19,20 @@ Formerly **Apropos OSK** (`apropos-osk@besho-sho`); renamed to Tabula OSK in ver
 
 ## Screenshots
 
-The docked keyboard with word suggestions:
-![Tabula OSK docked at the bottom of the screen, with word suggestions above the keys](screenshots/keyboard.png)
+The Tablet layout (Material style), docked, with next-word suggestions in the header:
+![Tabula OSK Tablet layout docked at the bottom of the screen, with next-word suggestions](screenshots/tablet-suggestions.png)
 
-The settings window:
-![Tabula OSK settings window](screenshots/settings.png)
+Hold a key for accents and symbols; slide to one and let go:
+![Long-press popup with accented e variants](screenshots/long-press.png)
 
-## Demo
+The US TKL layout in the Fluent style:
+![US TKL layout with Esc, function row keys, arrows and all modifiers](screenshots/fluent-us.png)
 
-Move the cursor by dragging on the space bar:
-<img width="1000" height="285" alt="spaceslider" src="https://github.com/user-attachments/assets/1bc6c466-9778-4bc9-a782-9a8b6c2f9f75" />
-
-Select and delete text by dragging on Backspace:
-<img width="1000" height="285" alt="backslider" src="https://github.com/user-attachments/assets/1d0c86d2-7fce-4ced-9b43-6085090619ed" />
+The settings window and the Layout Studio:
+<p>
+<img src="screenshots/settings.png" alt="Tabula OSK settings window" width="49%">
+<img src="screenshots/layout-studio.png" alt="Layout Studio, the visual editor for a custom layout" width="49%">
+</p>
 
 ## Installation
 
@@ -78,7 +79,7 @@ and the *Atkinson Hyperlegible Next* font for the default key labels. If that fo
 ### Layout and keys
 * **TKL layout:** Esc, a combined number/Fn row (F1 to F12), arrows, and all modifiers: Shift, Ctrl, Alt, AltGr, Super and Fn.
   Combinations such as `Ctrl+Alt+Del` and `Super+key` work.
-* **Built-in layouts:** Italian (ISO, with the tall Enter key), US (ANSI), and **Tablet (US, Gboard style)**: a touch layout
+* **Built-in layouts:** US (ANSI) and **Tablet (US, Gboard style)**: a touch layout
   laid out like Gboard's tablet keyboard: `` ` `` and the number row ending in `Backspace`; `Tab` (hold for `Esc`) and `|` (Shift for `\`) around the top letter row; `Caps Lock` and `Enter` (→) around the home row; `Shift` on both sides with `,` `.` beside `m` (hold `,` for the emoji chooser in GTK apps, hold `.` for `./` `../` `~/` `.com`); and `Ctrl` `❖` `/` `Space` `▲` `▼` at the bottom (slide on Space for Left/Right). Tap `❖` for Super, long-press it for a sticky `Alt` (tap it again to release). Long-press `▲`/`▼` for Page Up/Down (▼ starts on Page Down), or Shift+Page Up/Down to scroll a terminal's history.
 * **Modifier behavior:** each key can work as a normal key (hold) or as an on/off switch (latch).
 * **Modified-key highlight:** while Shift, AltGr or Fn is active, the keys that change symbol are colored. The colors can be changed.
