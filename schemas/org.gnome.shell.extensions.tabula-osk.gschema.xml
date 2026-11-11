@@ -62,11 +62,11 @@
       <summary>Show keyboard toggle icon in top panel</summary>
     </key>
     <key name="layout-variant" type="s">
-      <default>"it"</default>
-      <summary>Keyboard layout: it, us, custom</summary>
+      <default>"phone"</default>
+      <summary>Keyboard layout: us, phone (Tablet), custom, it (Italian, not offered in the settings)</summary>
     </key>
     <key name="layout-cycle" type="as">
-      <default>['it', 'us', 'phone', 'custom']</default>
+      <default>['us', 'phone']</default>
       <summary>Layouts the header layout button cycles through (it, us, phone, custom)</summary>
     </key>
     <key name="dock-bottom" type="b">

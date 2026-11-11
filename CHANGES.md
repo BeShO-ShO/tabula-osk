@@ -1,5 +1,19 @@
 # Changes
 
+## Unreleased
+- **Settings window reorganized** into three short pages: **Typing** (suggestions, autocorrect, smart typing, key repeat and
+  swipes), **Showing** (pop-up behaviour, top bar button, placement and size) and **Look** (layout, key style, font, spacing,
+  modifier colours). Options that depend on another one sit inside it and are only shown when it is on; long explanations
+  moved into (i) popovers that also work with touch. The window can be searched.
+- One **Placement** choice (Floating / Docked / Docked, full width / full width with keys centered) replaces the three dock
+  switches; the width setting is greyed out when it has no effect. **Height** and an optional **separate portrait height**
+  can now be set in the settings as well as with the drag bar.
+- Font: one row instead of two. It says when Atkinson Hyperlegible Next is not installed and the system font is used.
+- **Layout Studio** opens as a sub-page from *Look*. *Save and Use* sits in its header bar; *Start over from* US or Tablet
+  asks before discarding unsaved edits; a deleted key can be restored with *Undo*; new keys are added after the selected one.
+- The Italian layout is no longer offered in the settings (it stays in the code and is listed only if it is the layout in
+  use). New installs start on the Tablet layout, cycling between US and Tablet.
+
 ## 1.2.0 (2026-11-06)
 - **Renamed to Tabula OSK** (was Apropos OSK, which also clashed with the `apropos` command). New extension ID
   `tabula-osk@besho-sho`, settings schema `org.gnome.shell.extensions.tabula-osk`, config folder `~/.config/tabula-osk/`,

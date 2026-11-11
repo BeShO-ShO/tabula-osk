@@ -3,6 +3,7 @@ import Gtk from 'gi://Gtk';
 import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
 import Pango from 'gi://Pango';
+import PangoCairo from 'gi://PangoCairo';
 import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 import { Layouts, loadCustomLayout, saveCustomLayout } from './layouts.js';
 
@@ -114,103 +115,331 @@ function createColorPickerRow(title, subtitle, onColorSelected, onReset) {
         }
     };
 }
+// A small (i) button that shows longer help in a popover (works with touch, unlike tooltips)
+function infoButton(text) {
+    const label = new Gtk.Label({
+        label: text,
+        wrap: true,
+        max_width_chars: 42,
+        xalign: 0,
+        margin_top: 6,
+        margin_bottom: 6,
+        margin_start: 6,
+        margin_end: 6,
+    });
+    const popover = new Gtk.Popover();
+    popover.set_child(label);
+    return new Gtk.MenuButton({
+        icon_name: 'help-about-symbolic',
+        popover,
+        valign: Gtk.Align.CENTER,
+        css_classes: ['flat', 'circular'],
+        tooltip_text: _('More information'),
+    });
+}
+
+// On/off row bound to a boolean key, with an optional (i) button before the switch
+function switchRow(settings, key, title, subtitle, info) {
+    const row = new Adw.ActionRow({ title, subtitle: subtitle || '' });
+    if (info)
+        row.add_suffix(infoButton(info));
+    const sw = new Gtk.Switch({ valign: Gtk.Align.CENTER });
+    settings.bind(key, sw, 'active', Gio.SettingsBindFlags.DEFAULT);
+    row.add_suffix(sw);
+    row.activatable_widget = sw;
+    return row;
+}
+
+// Expander whose own switch is the boolean key; its child rows are the options that depend on it
+function expanderSwitch(settings, key, title, subtitle, info) {
+    const row = new Adw.ExpanderRow({
+        title,
+        subtitle: subtitle || '',
+        show_enable_switch: true,
+    });
+    if (info)
+        row.add_suffix(infoButton(info));
+    settings.bind(key, row, 'enable-expansion', Gio.SettingsBindFlags.DEFAULT);
+    // Turning the switch on expands the row; start collapsed anyway
+    row.expanded = false;
+    return row;
+}
+
+function spinRow(settings, key, title, subtitle, lower, upper, step) {
+    const row = new Adw.SpinRow({
+        title,
+        subtitle: subtitle || '',
+        adjustment: new Gtk.Adjustment({ lower, upper, step_increment: step }),
+    });
+    bindIntToSpinRow(settings, key, row);
+    return row;
+}
+
+const DEFAULT_FONT = 'Atkinson Hyperlegible Next';
+
+// Layouts offered in the settings. Italian stays in the code (and in the menu only if it is
+// the layout in use) but is not offered otherwise.
+const LAYOUT_CHOICES = [
+    ['us', 'US (TKL)'],
+    ['phone', 'Tablet (US, Gboard style)'],
+    ['custom', 'Custom'],
+];
 
 export default class TabulaOskPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
+        window.search_enabled = true;
+        window.add(this._buildTypingPage(settings));
+        window.add(this._buildShowingPage(settings));
+        window.add(this._buildLookPage(window, settings));
+    }
 
-        // ==========================================
-        // Page 1: Layout, Dimensioni & Spaziature
-        // ==========================================
-        const page1 = new Adw.PreferencesPage({
-            title: _('Appearance and Layout'),
+    // ==========================================
+    // Page 1: Typing (what the keys do)
+    // ==========================================
+    _buildTypingPage(settings) {
+        const page = new Adw.PreferencesPage({
+            title: _('Typing'),
             icon_name: 'input-keyboard-symbolic',
         });
-        window.add(page1);
 
-        // Group 1: Modalità Docking & Finestre
-        const dockGroup = new Adw.PreferencesGroup({
-            title: _('Positioning and Window Management'),
-            description: _('Configure how the keyboard docks to the screen and interacts with open applications'),
+        const suggestGroup = new Adw.PreferencesGroup({ title: _('Suggestions and Corrections') });
+        page.add(suggestGroup);
+
+        const suggestRow = expanderSwitch(settings, 'suggestions-enabled',
+            _('Word suggestions'),
+            _('Three word completions above the keys'),
+            _('Learned words stay on this computer. Password fields are never recorded.'));
+        suggestRow.add_row(switchRow(settings, 'use-typing-booster',
+            _('Use Typing Booster'),
+            _('Take the suggestions from ibus-typing-booster'),
+            _('Typing Booster sees the real text and learns your words. While the keyboard is open, the input method switches to Typing Booster and switches back when it closes. If Typing Booster is not installed, the built-in word list is used.')));
+        suggestGroup.add(suggestRow);
+
+        suggestGroup.add(switchRow(settings, 'autocorrect',
+            _('Autocorrect'),
+            _('Fix misspelled English words on space or punctuation'),
+            _('Uses the system spell checker (Enchant/Hunspell). Press Backspace right after a correction to undo it; that word is then left alone. Never used in password, terminal, URL or e-mail fields.')));
+
+        const smartGroup = new Adw.PreferencesGroup({ title: _('Smart Typing') });
+        page.add(smartGroup);
+
+        smartGroup.add(switchRow(settings, 'auto-capitalize',
+            _('Auto-capitalization'),
+            _('Capital letter at the start of a sentence'),
+            _('Shift turns on by itself at the start of a sentence and of an empty field. It only affects letters. Tap Shift to type a small letter instead.')));
+        smartGroup.add(switchRow(settings, 'double-space-period',
+            _('Double-space for a period'),
+            _('Tap space twice after a word to type a period and a space')));
+        smartGroup.add(switchRow(settings, 'smart-auto-pairs',
+            _('Close brackets and quotes'),
+            _('Typing ( adds ) with the cursor in between'),
+            _('Works for (), [], {} and "". If you type the closing character anyway, the cursor steps over the one already there.')));
+
+        const longPressRow = expanderSwitch(settings, 'long-press',
+            _('Hold for accents and symbols'),
+            _('Tablet layout, and custom layouts made from it'),
+            _('Hold a key to open a row of accented letters and symbols, slide to one and let go. The symbol in the corner of the key comes first.'));
+        longPressRow.add_row(spinRow(settings, 'long-press-delay',
+            _('Hold time (ms)'), _('How long to hold before the row appears'), 150, 900, 25));
+        smartGroup.add(longPressRow);
+
+        const keysGroup = new Adw.PreferencesGroup({ title: _('Keys') });
+        page.add(keysGroup);
+
+        keysGroup.add(switchRow(settings, 'play-sound',
+            _('Click sound'), _('A soft click on each key press')));
+
+        const repeatRow = new Adw.ExpanderRow({
+            title: _('Key repeat and swipes'),
+            subtitle: _('Held keys, space-bar cursor and Backspace selection'),
         });
-        page1.add(dockGroup);
+        repeatRow.add_row(spinRow(settings, 'repeat-delay',
+            _('Repeat delay (ms)'), _('How long a held key waits before repeating (default 320)'), 150, 800, 20));
+        repeatRow.add_row(spinRow(settings, 'repeat-interval',
+            _('Repeat interval (ms)'), _('Time between repeats (default 36)'), 15, 120, 5));
+        repeatRow.add_row(spinRow(settings, 'space-slider-sensitivity',
+            _('Space-bar swipe (px per character)'), _('Drag along the space bar to move the cursor'), 6, 40, 2));
+        repeatRow.add_row(spinRow(settings, 'backspace-slider-sensitivity',
+            _('Backspace swipe (px per character)'), _('Drag left from Backspace to select text to delete'), 8, 45, 2));
+        keysGroup.add(repeatRow);
 
-        // Dock Full Strip (Strut Mode)
-        const fullStripRow = new Adw.SwitchRow({
-            title: _('Full-width coverage (Strut Mode)'),
-            subtitle: _('The keyboard covers the full bottom width of the screen and moves/resizes windows upward so no text field is covered'),
+        return page;
+    }
+
+    // ==========================================
+    // Page 2: Showing (when and where it appears)
+    // ==========================================
+    _buildShowingPage(settings) {
+        const page = new Adw.PreferencesPage({
+            title: _('Showing'),
+            icon_name: 'view-reveal-symbolic',
         });
-        settings.bind('dock-full-strip', fullStripRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        dockGroup.add(fullStripRow);
 
-        // Full Strip with Centered Keys
-        const centerKeysRow = new Adw.SwitchRow({
-            title: _('Center keys in the full-width bar'),
-            subtitle: _('In full-width mode (Strut Mode), keeps keys at standard width, centered, leaving wide margins on the left and right'),
-        });
-        settings.bind('full-strip-centered-keys', centerKeysRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        dockGroup.add(centerKeysRow);
+        const openGroup = new Adw.PreferencesGroup({ title: _('Opening and Closing') });
+        page.add(openGroup);
 
-        // Dock Bottom
-        const dockBottomRow = new Adw.SwitchRow({
-            title: _('Dock to bottom edge'),
-            subtitle: _('When off, the keyboard floats freely and can be dragged around the screen'),
-        });
-        settings.bind('dock-bottom', dockBottomRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        dockGroup.add(dockBottomRow);
+        const autoShowRow = expanderSwitch(settings, 'auto-show',
+            _('Pop up on text fields'),
+            _('Open when a text field is selected, hide when you leave it'),
+            _('Also stops the stock GNOME on-screen keyboard from opening.'));
+        autoShowRow.add_row(switchRow(settings, 'auto-show-touch-only',
+            _('Only after touch'),
+            _('Not when you reach the field with the keyboard, touchpad or mouse')));
+        autoShowRow.add_row(switchRow(settings, 'hide-on-hardware-key',
+            _('Hide on physical key'),
+            _('Close when you type on the Type Cover or another keyboard')));
+        openGroup.add(autoShowRow);
 
-        // Padding Bottom
-        const padBottomRow = new Adw.SpinRow({
-            title: _('Padding from bottom edge (px)'),
-            subtitle: _('Distance or safety margin from the bottom edge of the screen'),
-            adjustment: new Gtk.Adjustment({
-                lower: 0,
-                upper: 60,
-                step_increment: 2,
-            }),
-        });
-        bindIntToSpinRow(settings, 'padding-bottom', padBottomRow);
-        dockGroup.add(padBottomRow);
+        openGroup.add(switchRow(settings, 'show-panel-button',
+            _('Top bar button'), _('Keyboard icon in the top bar to open or close it')));
 
-        // Group 2: Dimensioni
-        const dimGroup = new Adw.PreferencesGroup({
-            title: _('Size'),
-            description: _('Adjust the width of the keyboard. To change its height, drag the bar at the top of the docked keyboard'),
-        });
-        page1.add(dimGroup);
+        const placeGroup = new Adw.PreferencesGroup({ title: _('Position and Size') });
+        page.add(placeGroup);
 
-        // Layout variant selector
-        const layoutRow = new Adw.ComboRow({
-            title: _('Active typing layout'),
-            subtitle: _('Select the preset or custom layout'),
+        // Placement: one choice for the dock-bottom / dock-full-strip / full-strip-centered-keys trio,
+        // the same cycle as the [Dock] and [Norm]/[Full] header buttons
+        const placementRow = new Adw.ComboRow({
+            title: _('Placement'),
             model: new Gtk.StringList({
-                strings: ['Italian (Compact TKL)', 'English (US TKL)', 'Tablet (US, Gboard style)', 'Custom Layout']
+                strings: [_('Floating'), _('Docked'), _('Docked, full width'), _('Docked, full width, keys centered')],
             }),
         });
-        const layoutKeys = ['it', 'us', 'phone', 'custom'];
+        placementRow.add_suffix(infoButton(
+            _('Floating: drag it anywhere on the screen. Docked: sits at the bottom edge. Full width: covers the whole bottom edge and moves windows up, so no text field is hidden behind it. The header buttons on the keyboard change this too.')));
+        placeGroup.add(placementRow);
+
+        const widthRow = spinRow(settings, 'width-percent',
+            _('Width (%)'), _('Share of the screen width'), 40, 100, 5);
+        placeGroup.add(widthRow);
+
+        let placementSyncing = false;
+        const syncPlacement = () => {
+            const dock = settings.get_boolean('dock-bottom');
+            const full = settings.get_boolean('dock-full-strip');
+            const centered = settings.get_boolean('full-strip-centered-keys');
+            const idx = !dock ? 0 : !full ? 1 : !centered ? 2 : 3;
+            placementSyncing = true;
+            if (placementRow.selected !== idx)
+                placementRow.selected = idx;
+            placementSyncing = false;
+            // Full width without centered keys ignores the width setting
+            widthRow.sensitive = idx !== 2;
+        };
+        syncPlacement();
+        placementRow.connect('notify::selected', () => {
+            if (placementSyncing)
+                return;
+            const idx = placementRow.selected;
+            placementSyncing = true;
+            settings.set_boolean('full-strip-centered-keys', idx === 3);
+            settings.set_boolean('dock-full-strip', idx >= 2);
+            settings.set_boolean('dock-bottom', idx >= 1);
+            placementSyncing = false;
+            syncPlacement();
+        });
+        for (const key of ['dock-bottom', 'dock-full-strip', 'full-strip-centered-keys']) {
+            settings.connect(`changed::${key}`, () => {
+                if (!placementSyncing)
+                    syncPlacement();
+            });
+        }
+
+        placeGroup.add(spinRow(settings, 'height-percent',
+            _('Height (%)'), _('Share of the screen height. You can also drag the bar at the top of the keyboard'), 20, 55, 1));
+
+        // Portrait height: 0 in the setting means "same as landscape"
+        const portraitRow = new Adw.ExpanderRow({
+            title: _('Separate height in portrait'),
+            subtitle: _('When off, portrait uses the height above'),
+            show_enable_switch: true,
+        });
+        const portraitSpin = new Adw.SpinRow({
+            title: _('Portrait height (%)'),
+            adjustment: new Gtk.Adjustment({ lower: 20, upper: 55, step_increment: 1 }),
+        });
+        portraitRow.add_row(portraitSpin);
+        let portraitSyncing = false;
+        const syncPortrait = () => {
+            portraitSyncing = true;
+            const v = settings.get_int('height-percent-portrait');
+            portraitRow.enable_expansion = v > 0;
+            portraitSpin.value = v > 0 ? v : settings.get_int('height-percent');
+            portraitSyncing = false;
+        };
+        syncPortrait();
+        portraitRow.expanded = false;
+        portraitRow.connect('notify::enable-expansion', () => {
+            if (portraitSyncing)
+                return;
+            settings.set_int('height-percent-portrait',
+                portraitRow.enable_expansion ? Math.round(portraitSpin.value) : 0);
+        });
+        portraitSpin.connect('notify::value', () => {
+            if (portraitSyncing || !portraitRow.enable_expansion)
+                return;
+            const v = Math.round(portraitSpin.value);
+            if (settings.get_int('height-percent-portrait') !== v)
+                settings.set_int('height-percent-portrait', v);
+        });
+        settings.connect('changed::height-percent-portrait', syncPortrait);
+        settings.connect('changed::height-percent', () => {
+            if (!portraitRow.enable_expansion)
+                syncPortrait();
+        });
+        placeGroup.add(portraitRow);
+
+        placeGroup.add(spinRow(settings, 'padding-bottom',
+            _('Bottom padding (px)'), _('Space between the keys and the bottom edge'), 0, 60, 2));
+
+        return page;
+    }
+
+    // ==========================================
+    // Page 3: Look (layout, key style, font)
+    // ==========================================
+    _buildLookPage(window, settings) {
+        const page = new Adw.PreferencesPage({
+            title: _('Look'),
+            icon_name: 'preferences-desktop-appearance-symbolic',
+        });
+
+        const layoutGroup = new Adw.PreferencesGroup({ title: _('Layout') });
+        page.add(layoutGroup);
+
+        // Layout in use
+        const choices = LAYOUT_CHOICES.slice();
+        if (settings.get_string('layout-variant') === 'it')
+            choices.push(['it', 'Italian (Compact TKL)']);
+        const layoutKeys = choices.map(c => c[0]);
+        const layoutRow = new Adw.ComboRow({
+            title: _('Layout'),
+            model: new Gtk.StringList({ strings: choices.map(c => _(c[1])) }),
+        });
         const syncLayoutRow = () => {
             const idx = layoutKeys.indexOf(settings.get_string('layout-variant'));
-            const want = idx >= 0 ? idx : 0;
+            const want = idx >= 0 ? idx : Gtk.INVALID_LIST_POSITION;
             if (layoutRow.selected !== want)
                 layoutRow.selected = want;
         };
         syncLayoutRow();
         layoutRow.connect('notify::selected', () => {
-            const key = layoutKeys[layoutRow.selected] || 'it';
-            if (settings.get_string('layout-variant') !== key)
+            const key = layoutKeys[layoutRow.selected];
+            if (key && settings.get_string('layout-variant') !== key)
                 settings.set_string('layout-variant', key);
         });
         settings.connect('changed::layout-variant', syncLayoutRow);
-        dimGroup.add(layoutRow);
+        layoutGroup.add(layoutRow);
 
-        // Which layouts the [layout] button in the keyboard header cycles through
+        // Which layouts the layout button in the keyboard header cycles through.
+        // Italian is not offered; if it is already in the list it is kept as is.
         const cycleRow = new Adw.ExpanderRow({
-            title: _('Layouts in the header toggle'),
-            subtitle: _('Tapping the layout name at the top left switches between these'),
+            title: _('Layout button cycles through'),
+            subtitle: _('Tap the layout name at the top left of the keyboard to switch'),
         });
-        const cycleNames = ['Italian (Compact TKL)', 'English (US TKL)', 'Tablet (US, Gboard style)', 'Custom Layout'];
-        const cycleSwitches = layoutKeys.map((key, i) => {
-            const row = new Adw.SwitchRow({ title: _(cycleNames[i]) });
+        const cycleKeys = LAYOUT_CHOICES.map(c => c[0]);
+        const cycleSwitches = LAYOUT_CHOICES.map(([, name]) => {
+            const row = new Adw.SwitchRow({ title: _(name) });
             cycleRow.add_row(row);
             return row;
         });
@@ -219,12 +448,12 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
             cycleSyncing = true;
             const chosen = settings.get_strv('layout-cycle');
             cycleSwitches.forEach((row, i) => {
-                row.active = chosen.includes(layoutKeys[i]);
+                row.active = chosen.includes(cycleKeys[i]);
             });
-            const n = cycleSwitches.filter(r => r.active).length;
             // The last layout left on cannot be switched off
+            const total = chosen.length;
             cycleSwitches.forEach(row => {
-                row.sensitive = !(row.active && n === 1);
+                row.sensitive = !(row.active && total === 1);
             });
             cycleSyncing = false;
         };
@@ -232,7 +461,8 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
         cycleSwitches.forEach(row => row.connect('notify::active', () => {
             if (cycleSyncing)
                 return;
-            const chosen = layoutKeys.filter((k, i) => cycleSwitches[i].active);
+            const hidden = settings.get_strv('layout-cycle').filter(k => !cycleKeys.includes(k));
+            const chosen = hidden.concat(cycleKeys.filter((k, i) => cycleSwitches[i].active));
             if (chosen.length === 0) {
                 syncCycle();
                 return;
@@ -240,190 +470,134 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
             settings.set_strv('layout-cycle', chosen);
         }));
         settings.connect('changed::layout-cycle', syncCycle);
-        dimGroup.add(cycleRow);
+        layoutGroup.add(cycleRow);
 
-        // Key style
+        // Layout Studio opens as a sub-page
+        const studioRow = new Adw.ActionRow({
+            title: _('Layout Studio'),
+            subtitle: _('Edit the custom layout: labels, sizes, colours and key positions'),
+            activatable: true,
+        });
+        studioRow.add_suffix(new Gtk.Image({ icon_name: 'go-next-symbolic' }));
+        let studioPage = null;
+        studioRow.connect('activated', () => {
+            if (!studioPage)
+                studioPage = this._buildLayoutStudioPage(window, settings);
+            window.push_subpage(studioPage);
+        });
+        layoutGroup.add(studioRow);
+
+        const keysGroup = new Adw.PreferencesGroup({ title: _('Keys') });
+        page.add(keysGroup);
+
         const themeRow = new Adw.ComboRow({
             title: _('Key style'),
-            subtitle: _('Fluent: the Windows 11 look. Material: a flat phone look that follows the system light or dark style'),
+            subtitle: _('Fluent: Windows 11 look. Material: flat phone look that follows light or dark style'),
             model: new Gtk.StringList({ strings: [_('Fluent'), _('Material')] }),
         });
         const themeKeys = ['fluent', 'material'];
-        themeRow.selected = Math.max(0, themeKeys.indexOf(settings.get_string('theme')));
+        const syncTheme = () => {
+            const idx = Math.max(0, themeKeys.indexOf(settings.get_string('theme')));
+            if (themeRow.selected !== idx)
+                themeRow.selected = idx;
+        };
+        syncTheme();
         themeRow.connect('notify::selected', () => {
-            settings.set_string('theme', themeKeys[themeRow.selected] || 'fluent');
+            const key = themeKeys[themeRow.selected] || 'fluent';
+            if (settings.get_string('theme') !== key)
+                settings.set_string('theme', key);
         });
-        dimGroup.add(themeRow);
+        settings.connect('changed::theme', syncTheme);
+        keysGroup.add(themeRow);
 
-        // Width Percent
-        const widthRow = new Adw.SpinRow({
-            title: _('Keyboard width (%)'),
-            subtitle: _('Percentage of screen width (used when not in full-width mode)'),
-            adjustment: new Gtk.Adjustment({
-                lower: 40,
-                upper: 100,
-                step_increment: 5,
-            }),
-        });
-        bindIntToSpinRow(settings, 'width-percent', widthRow);
-        dimGroup.add(widthRow);
-
-        // Height: set by dragging the bar at the top of the docked keyboard (stored
-        // separately for landscape and portrait), so there is no field for it here
-
-        // Group: Leggibilità del testo
-        const readGroup = new Adw.PreferencesGroup({
-            title: _('Text Readability and Font'),
-            description: _('By default, Atkinson Hyperlegible Next is used, designed by the Braille Institute for maximum legibility, low vision, astigmatism and dyslexia'),
-        });
-        page1.add(readGroup);
-
-        const fontChooserRow = new Adw.ActionRow({
-            title: _('Select system font'),
-            subtitle: _('Browse installed fonts visually or click the eraser to restore the default'),
-        });
-
-        const fontDialog = new Gtk.FontDialog();
-        const fontDialogBtn = new Gtk.FontDialogButton({
-            dialog: fontDialog,
+        // Font: one row, family picker + reset to the built-in legible font
+        const fontRow = new Adw.ActionRow({ title: _('Font') });
+        const fontBtn = new Gtk.FontDialogButton({
+            dialog: new Gtk.FontDialog(),
+            level: Gtk.FontLevel.FAMILY,
             valign: Gtk.Align.CENTER,
         });
-
-        const currentFont = (settings.get_string('font-family') || '').trim();
-        try {
-            fontDialogBtn.set_font_desc(Pango.FontDescription.from_string(currentFont ? `${currentFont} 12` : 'Atkinson Hyperlegible Next 12'));
-        } catch (e) {}
-
         const resetFontBtn = new Gtk.Button({
             icon_name: 'edit-clear-symbolic',
             valign: Gtk.Align.CENTER,
-            tooltip_text: _('Reset to default font (Atkinson Hyperlegible Next)'),
+            css_classes: ['flat'],
+            tooltip_text: _('Back to the default font'),
         });
-
-        const fontBtnBox = new Gtk.Box({
-            orientation: Gtk.Orientation.HORIZONTAL,
-            spacing: 6,
-            valign: Gtk.Align.CENTER,
-        });
-        fontBtnBox.append(fontDialogBtn);
-        fontBtnBox.append(resetFontBtn);
-        fontChooserRow.add_suffix(fontBtnBox);
-        fontChooserRow.activatable_widget = fontDialogBtn;
-        readGroup.add(fontChooserRow);
-
-        const fontRow = new Adw.EntryRow({
-            title: _('Custom font name (empty = automatic)'),
-        });
-        settings.bind('font-family', fontRow, 'text', Gio.SettingsBindFlags.DEFAULT);
-
-        fontDialogBtn.connect('notify::font-desc', () => {
-            const desc = fontDialogBtn.get_font_desc();
-            if (desc) {
-                const family = desc.get_family();
-                if (family && family !== settings.get_string('font-family')) {
-                    settings.set_string('font-family', family);
-                }
-            }
-        });
-
-        resetFontBtn.connect('clicked', () => {
-            settings.set_string('font-family', '');
-            fontRow.text = '';
+        // The default font is used only if it is installed; otherwise keys use the system font
+        let defaultInstalled = false;
+        try {
+            defaultInstalled = PangoCairo.FontMap.get_default().list_families()
+                .some(fam => fam.get_name() === DEFAULT_FONT);
+        } catch (e) {}
+        let shownDefault = DEFAULT_FONT;
+        if (!defaultInstalled) {
+            // Show the real family behind the 'Sans' alias so the button has a proper name
+            shownDefault = 'Sans';
             try {
-                fontDialogBtn.set_font_desc(Pango.FontDescription.from_string('Atkinson Hyperlegible Next 12'));
+                const fontMap = PangoCairo.FontMap.get_default();
+                const font = fontMap.load_font(fontMap.create_context(), Pango.FontDescription.from_string('Sans 12'));
+                shownDefault = font.describe().get_family() || 'Sans';
             } catch (e) {}
-        });
-
-        settings.connect('changed::font-family', () => {
+        }
+        let fontSyncing = false;
+        const syncFont = () => {
             const f = (settings.get_string('font-family') || '').trim();
+            fontSyncing = true;
             try {
-                fontDialogBtn.set_font_desc(Pango.FontDescription.from_string(f ? `${f} 12` : 'Atkinson Hyperlegible Next 12'));
+                fontBtn.set_font_desc(Pango.FontDescription.from_string(`${f || shownDefault} 12`));
             } catch (e) {}
+            fontSyncing = false;
+            if (f)
+                fontRow.subtitle = _('Custom font');
+            else if (defaultInstalled)
+                fontRow.subtitle = _('Default: Atkinson Hyperlegible Next, made for low vision and dyslexia');
+            else
+                fontRow.subtitle = _('Default: the system font. Install Atkinson Hyperlegible Next for the most legible keys');
+            resetFontBtn.sensitive = !!f;
+        };
+        syncFont();
+        fontBtn.connect('notify::font-desc', () => {
+            if (fontSyncing)
+                return;
+            const desc = fontBtn.get_font_desc();
+            const family = desc ? desc.get_family() : '';
+            if (!family)
+                return;
+            const value = family === shownDefault ? '' : family;
+            if (value !== settings.get_string('font-family'))
+                settings.set_string('font-family', value);
         });
+        resetFontBtn.connect('clicked', () => settings.set_string('font-family', ''));
+        settings.connect('changed::font-family', syncFont);
+        fontRow.add_suffix(fontBtn);
+        fontRow.add_suffix(resetFontBtn);
+        fontRow.activatable_widget = fontBtn;
+        keysGroup.add(fontRow);
 
-        readGroup.add(fontRow);
+        keysGroup.add(spinRow(settings, 'font-scale',
+            _('Text size (%)'), _('Labels shrink only if they do not fit the key'), 80, 160, 5));
 
-        const fontScaleRow = new Adw.SpinRow({
-            title: _('Text size (%)'),
-            subtitle: _('Enlarges the labels on the keys; text shrinks automatically only if it does not fit in the key'),
-            adjustment: new Gtk.Adjustment({
-                lower: 80,
-                upper: 160,
-                step_increment: 5,
-            }),
+        const spacingRow = new Adw.ExpanderRow({
+            title: _('Spacing and corners'),
+            subtitle: _('Gaps between keys and rows, corner rounding'),
         });
-        bindIntToSpinRow(settings, 'font-scale', fontScaleRow);
-        readGroup.add(fontScaleRow);
+        spacingRow.add_row(spinRow(settings, 'key-gap-x',
+            _('Gap between keys (px)'), '', 1, 16, 1));
+        spacingRow.add_row(spinRow(settings, 'key-gap-y',
+            _('Gap between rows (px)'), '', 1, 16, 1));
+        spacingRow.add_row(spinRow(settings, 'number-row-gap',
+            _('Extra gap below the number row (px)'), '', 2, 30, 2));
+        spacingRow.add_row(spinRow(settings, 'key-radius',
+            _('Corner radius (px)'), '', 0, 20, 1));
+        keysGroup.add(spacingRow);
 
-        // Group 3: Spaziature tra i tasti
-        const spacingGroup = new Adw.PreferencesGroup({
-            title: _('Key Spacing and Margins'),
-            description: _('Separate horizontal and vertical distances between individual keys and the number row'),
+        const modColorsRow = new Adw.ExpanderRow({
+            title: _('Modifier colours'),
+            subtitle: _('Keys whose symbol changes with AltGr, Shift or FN (US TKL layout)'),
         });
-        page1.add(spacingGroup);
-
-        // Horizontal Gap (key-gap-x)
-        const gapXRow = new Adw.SpinRow({
-            title: _('Horizontal gap between keys (px)'),
-            subtitle: _('Horizontal space between adjacent keys in the same row'),
-            adjustment: new Gtk.Adjustment({
-                lower: 1,
-                upper: 16,
-                step_increment: 1,
-            }),
-        });
-        bindIntToSpinRow(settings, 'key-gap-x', gapXRow);
-        spacingGroup.add(gapXRow);
-
-        // Vertical Gap (key-gap-y)
-        const gapYRow = new Adw.SpinRow({
-            title: _('Vertical gap between rows (px)'),
-            subtitle: _('Vertical space between one row of keys and the one below'),
-            adjustment: new Gtk.Adjustment({
-                lower: 1,
-                upper: 16,
-                step_increment: 1,
-            }),
-        });
-        bindIntToSpinRow(settings, 'key-gap-y', gapYRow);
-        spacingGroup.add(gapYRow);
-
-        // Number row separation (TKL gap)
-        const numGapRow = new Adw.SpinRow({
-            title: _('Number row spacing (TKL gap) (px)'),
-            subtitle: _('Extra space separating the number row from the QWERTY row'),
-            adjustment: new Gtk.Adjustment({
-                lower: 2,
-                upper: 30,
-                step_increment: 2,
-            }),
-        });
-        bindIntToSpinRow(settings, 'number-row-gap', numGapRow);
-        spacingGroup.add(numGapRow);
-
-        // Key corner radius
-        const radiusRow = new Adw.SpinRow({
-            title: _('Key corner radius (px)'),
-            subtitle: _('Windows 11-style key rounding'),
-            adjustment: new Gtk.Adjustment({
-                lower: 0,
-                upper: 20,
-                step_increment: 1,
-            }),
-        });
-        bindIntToSpinRow(settings, 'key-radius', radiusRow);
-        spacingGroup.add(radiusRow);
-
-        // Group 4: Stile Tasti Modificati (AltGr, Shift, FN)
-        const modStyleGroup = new Adw.PreferencesGroup({
-            title: _('Modified Key Style (AltGr, Shift, FN combinations)'),
-            description: _('Choose background and contrast colors for keys that change symbol when a modifier is active (e.g. [ with AltGr or F1..F12 with FN)'),
-        });
-        page1.add(modStyleGroup);
-
         const modBgPicker = createColorPickerRow(
-            _('Modified keys background color'),
-            _('Background with color wheel and transparency (leave empty for the standard dark gray)'),
+            _('Background'),
+            _('Empty = the standard grey'),
             (colorStr) => settings.set_string('modified-key-bg-color', colorStr),
             () => {
                 settings.set_string('modified-key-bg-color', '');
@@ -431,11 +605,10 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
             }
         );
         modBgPicker.setColor(settings.get_string('modified-key-bg-color'));
-        modStyleGroup.add(modBgPicker.row);
-
+        modColorsRow.add_row(modBgPicker.row);
         const modTextPicker = createColorPickerRow(
-            _('Modified keys symbol color'),
-            _('Color of the symbol shown during the high-contrast combination'),
+            _('Symbol'),
+            _('Empty = the standard colour'),
             (colorStr) => settings.set_string('modified-key-text-color', colorStr),
             () => {
                 settings.set_string('modified-key-text-color', '');
@@ -443,352 +616,103 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
             }
         );
         modTextPicker.setColor(settings.get_string('modified-key-text-color'));
-        modStyleGroup.add(modTextPicker.row);
+        modColorsRow.add_row(modTextPicker.row);
+        keysGroup.add(modColorsRow);
 
-        // ==========================================
-        // Page 2: Reattività & Gesti
-        // ==========================================
-        const page2 = new Adw.PreferencesPage({
-            title: _('Responsiveness and Gestures'),
-            icon_name: 'input-touchpad-symbolic',
-        });
-        window.add(page2);
-
-        // Group: Key repeat & fluid writing
-        const speedGroup = new Adw.PreferencesGroup({
-            title: _('Typing Speed (Android / GBoard style)'),
-            description: _('Responsiveness for Backspace and continuous fast deletion'),
-        });
-        page2.add(speedGroup);
-
-        // Repeat delay
-        const delayRow = new Adw.SpinRow({
-            title: _('Repeat start delay (ms)'),
-            subtitle: _('Wait time before a held key starts repeating (default: 320ms)'),
-            adjustment: new Gtk.Adjustment({
-                lower: 150,
-                upper: 800,
-                step_increment: 20,
-            }),
-        });
-        bindIntToSpinRow(settings, 'repeat-delay', delayRow);
-        speedGroup.add(delayRow);
-
-        // Repeat rate
-        const rateRow = new Adw.SpinRow({
-            title: _('Repeat interval (ms)'),
-            subtitle: _('Continuous repeat rate (default: 36ms for maximum smoothness)'),
-            adjustment: new Gtk.Adjustment({
-                lower: 15,
-                upper: 120,
-                step_increment: 5,
-            }),
-        });
-        bindIntToSpinRow(settings, 'repeat-interval', rateRow);
-        speedGroup.add(rateRow);
-
-        // Spacebar and Backspace Gestures
-        const gestureGroup = new Adw.PreferencesGroup({
-            title: _('Swipe Gestures (Space and Backspace)'),
-            description: _('GBoard-style gestures: cursor sliding on the space bar and backward deletion on Backspace'),
-        });
-        page2.add(gestureGroup);
-
-        // Spacebar sensitivity
-        const sensRow = new Adw.SpinRow({
-            title: _('Space cursor sensitivity (px/character)'),
-            subtitle: _('Pixels of horizontal drag on the space bar for each character moved'),
-            adjustment: new Gtk.Adjustment({
-                lower: 6,
-                upper: 40,
-                step_increment: 2,
-            }),
-        });
-        bindIntToSpinRow(settings, 'space-slider-sensitivity', sensRow);
-        gestureGroup.add(sensRow);
-
-        // Backspace sensitivity
-        const backspaceSensRow = new Adw.SpinRow({
-            title: _('Backspace backward swipe sensitivity (px/character)'),
-            subtitle: _('Pixels of leftward drag on Backspace to select each character to delete'),
-            adjustment: new Gtk.Adjustment({
-                lower: 8,
-                upper: 45,
-                step_increment: 2,
-            }),
-        });
-        bindIntToSpinRow(settings, 'backspace-slider-sensitivity', backspaceSensRow);
-        gestureGroup.add(backspaceSensRow);
-
-        // Sound switch
-        const soundRow = new Adw.SwitchRow({
-            title: _('Sound feedback on key press'),
-            subtitle: _('Plays a soft click sound when each key is touched'),
-        });
-        settings.bind('play-sound', soundRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        gestureGroup.add(soundRow);
-
-        // Top panel button
-        const panelRow = new Adw.SwitchRow({
-            title: _('Top panel button'),
-            subtitle: _('Shows the keyboard icon in the top bar to open/close it with one click'),
-        });
-        settings.bind('show-panel-button', panelRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        gestureGroup.add(panelRow);
-
-        // Auto-show on text field focus
-        const autoShowRow = new Adw.SwitchRow({
-            title: _('Pop up when a text field is selected'),
-            subtitle: _('Opens the keyboard automatically on text fields and hides it when you leave them. Also blocks the default GNOME keyboard'),
-        });
-        settings.bind('auto-show', autoShowRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        gestureGroup.add(autoShowRow);
-
-        // Hide on physical key
-        const hwKeyRow = new Adw.SwitchRow({
-            title: _('Hide when a physical key is pressed'),
-            subtitle: _('Closes an automatically opened keyboard as soon as you type on the Type Cover or another hardware keyboard'),
-        });
-        settings.bind('hide-on-hardware-key', hwKeyRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        gestureGroup.add(hwKeyRow);
-
-        // Touch-only auto popup
-        const touchOnlyRow = new Adw.SwitchRow({
-            title: _('Pop up only after touch'),
-            subtitle: _('Opens automatically only when you tap a field with touch or pen, not when you get there with the keyboard, touchpad or mouse'),
-        });
-        settings.bind('auto-show-touch-only', touchOnlyRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        gestureGroup.add(touchOnlyRow);
-
-        // Word suggestions
-        const suggestRow = new Adw.SwitchRow({
-            title: _('Word suggestions'),
-            subtitle: _('Shows three word completions above the keys while you type on the on-screen keyboard. Learned words stay on this computer; password fields are never recorded'),
-        });
-        settings.bind('suggestions-enabled', suggestRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        gestureGroup.add(suggestRow);
-
-        // Word suggestions from ibus-typing-booster
-        const boosterRow = new Adw.SwitchRow({
-            title: _('Use Typing Booster for suggestions'),
-            subtitle: _('Takes the suggestions from ibus-typing-booster, which sees the real text and learns your words. Needs word suggestions turned on. While the keyboard is open, the input method switches to Typing Booster and switches back when it closes. Falls back to the built-in list if Typing Booster is not installed'),
-        });
-        settings.bind('use-typing-booster', boosterRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        settings.bind('suggestions-enabled', boosterRow, 'sensitive', Gio.SettingsBindFlags.GET);
-        gestureGroup.add(boosterRow);
-
-        // Group: Digitazione Intelligente
-        const smartGroup = new Adw.PreferencesGroup({
-            title: _('Smart Typing'),
-            description: _('Brackets and quotes, accents, capitals, periods and spelling'),
-        });
-        page2.add(smartGroup);
-
-        const autoPairsRow = new Adw.SwitchRow({
-            title: _('Smart bracket and quote completion'),
-            subtitle: _('Automatically closes pairs (), [], {}, "" placing the cursor in the middle, and steps over the closing character if you type it out of habit'),
-        });
-        settings.bind('smart-auto-pairs', autoPairsRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        smartGroup.add(autoPairsRow);
-
-        const longPressRow = new Adw.SwitchRow({
-            title: _('Hold keys for accents and symbols'),
-            subtitle: _('On the Tablet layout, holding a key opens a row of accented letters and symbols; slide to one and let go. The symbol in the corner of each key comes first'),
-        });
-        settings.bind('long-press', longPressRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        smartGroup.add(longPressRow);
-
-        const longPressDelayRow = new Adw.SpinRow({
-            title: _('Hold time (ms)'),
-            subtitle: _('How long to hold a key before the accents and symbols appear'),
-            adjustment: new Gtk.Adjustment({
-                lower: 150,
-                upper: 900,
-                step_increment: 25,
-            }),
-        });
-        bindIntToSpinRow(settings, 'long-press-delay', longPressDelayRow);
-        settings.bind('long-press', longPressDelayRow, 'sensitive', Gio.SettingsBindFlags.GET);
-        smartGroup.add(longPressDelayRow);
-
-        const autoCapRow = new Adw.SwitchRow({
-            title: _('Auto-capitalization'),
-            subtitle: _('Shift turns on by itself at the start of a sentence and of an empty field. It only affects letters. Tap Shift to type a small letter instead'),
-        });
-        settings.bind('auto-capitalize', autoCapRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        smartGroup.add(autoCapRow);
-
-        const doubleSpaceRow = new Adw.SwitchRow({
-            title: _('Double-space for a period'),
-            subtitle: _('Tapping space twice after a word types a period and a space'),
-        });
-        settings.bind('double-space-period', doubleSpaceRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        smartGroup.add(doubleSpaceRow);
-
-        const autocorrectRow = new Adw.SwitchRow({
-            title: _('Autocorrect (English)'),
-            subtitle: _('Fixes misspelled words when you type a space or punctuation, using the system spell checker (Enchant/Hunspell). Press Backspace right after a correction to undo it; that word is then left alone. Never used in password, terminal, URL or e-mail fields'),
-        });
-        settings.bind('autocorrect', autocorrectRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        smartGroup.add(autocorrectRow);
-
-        // ==========================================
-        // Page 3: Studio Customizzazione Layout Completa
-        // ==========================================
-        this._buildLayoutStudioPage(window, settings, layoutRow);
+        return page;
     }
 
-    _buildLayoutStudioPage(window, settings, layoutSelectorRow) {
-        const page3 = new Adw.PreferencesPage({
-            title: _('Layout and Keys Studio'),
-            icon_name: 'preferences-desktop-keyboard-shortcuts-symbolic',
+    // ==========================================
+    // Layout Studio (sub-page of Look)
+    // ==========================================
+    _buildLayoutStudioPage(window, settings) {
+        const page3 = new Adw.PreferencesPage();
+        const header = new Adw.HeaderBar();
+        const toolbarView = new Adw.ToolbarView({ content: page3 });
+        toolbarView.add_top_bar(header);
+        const navPage = new Adw.NavigationPage({
+            title: _('Layout Studio'),
+            child: toolbarView,
         });
-        window.add(page3);
 
-        let editingLayout = loadCustomLayout();
-        if (!editingLayout) {
-            editingLayout = JSON.parse(JSON.stringify(Layouts.it));
-            editingLayout.name = 'Custom';
-        }
+        const freshCopy = (key) => {
+            const l = JSON.parse(JSON.stringify(Layouts[key]));
+            l.name = 'Custom';
+            return l;
+        };
+        let editingLayout = loadCustomLayout() || freshCopy('phone');
+        let savedSnapshot = JSON.stringify(editingLayout);
+        const isDirty = () => JSON.stringify(editingLayout) !== savedSnapshot;
 
         let selectedRowIdx = 0;
         let selectedKeyIdx = 0;
 
-        // Group 1: Toolbar azioni
+        // Save in the header bar, always in reach
+        const saveBtn = new Gtk.Button({
+            label: _('Save and Use'),
+            css_classes: ['suggested-action'],
+            tooltip_text: _('Save the custom layout and switch the keyboard to it'),
+        });
+        saveBtn.connect('clicked', () => {
+            saveCustomLayout(editingLayout);
+            savedSnapshot = JSON.stringify(editingLayout);
+            settings.set_string('layout-variant', 'custom');
+            // Bump token to trigger a live reload in keyboard.js
+            const token = (settings.get_int('custom-layout-token') || 0) + 1;
+            settings.set_int('custom-layout-token', token);
+            window.add_toast(new Adw.Toast({ title: _('Custom layout saved and in use') }));
+        });
+        header.pack_end(saveBtn);
+
+        // Start over from a built-in layout (asks first if there are unsaved edits)
         const actionsGroup = new Adw.PreferencesGroup({
-            title: _('Keyboard Layout Customization'),
-            description: _('Edit any key: change its label, flex size, behavior (normal or ON/OFF toggle), colors and position'),
+            description: _('Tap a key in the preview, then change it below. Nothing reaches the keyboard until you press Save and Use.'),
         });
         page3.add(actionsGroup);
 
-        // Responsive two-row action toolbar (fits in narrow floating windows without overflow)
-        const mainToolbarBox = new Gtk.Box({
-            orientation: Gtk.Orientation.VERTICAL,
-            spacing: 6,
-            margin_top: 4,
-            margin_bottom: 6,
-            halign: Gtk.Align.CENTER,
-        });
-
-        const toolbarRow1 = new Gtk.Box({
-            orientation: Gtk.Orientation.HORIZONTAL,
-            spacing: 8,
-            halign: Gtk.Align.CENTER,
-        });
-        const resetItBtn = new Gtk.Button({ label: _('Reset to Italian') });
-        resetItBtn.connect('clicked', () => {
-            editingLayout = JSON.parse(JSON.stringify(Layouts.it));
-            editingLayout.name = 'Custom';
-            selectedRowIdx = 0;
-            selectedKeyIdx = 0;
-            renderVisualKeyboard();
-            updateInspector();
-        });
-        toolbarRow1.append(resetItBtn);
-
-        const resetUsBtn = new Gtk.Button({ label: _('Reset to US') });
-        resetUsBtn.connect('clicked', () => {
-            editingLayout = JSON.parse(JSON.stringify(Layouts.us));
-            editingLayout.name = 'Custom';
-            selectedRowIdx = 0;
-            selectedKeyIdx = 0;
-            renderVisualKeyboard();
-            updateInspector();
-        });
-        toolbarRow1.append(resetUsBtn);
-
-        // Tablet (Gboard style): long-press symbols, corner hints and its layout options
-        // (longPress, accents) are copied too, so a custom layout made from it keeps them
-        const resetTabletBtn = new Gtk.Button({ label: _('Reset to Tablet') });
-        resetTabletBtn.connect('clicked', () => {
-            editingLayout = JSON.parse(JSON.stringify(Layouts.phone));
-            editingLayout.name = 'Custom';
-            selectedRowIdx = 0;
-            selectedKeyIdx = 0;
-            renderVisualKeyboard();
-            updateInspector();
-        });
-        toolbarRow1.append(resetTabletBtn);
-        mainToolbarBox.append(toolbarRow1);
-
-        const toolbarRow2 = new Gtk.Box({
-            orientation: Gtk.Orientation.HORIZONTAL,
-            spacing: 8,
-            halign: Gtk.Align.CENTER,
-        });
-        const addKeyBtn = new Gtk.Button({
-            label: _('+ Add Key'),
-            css_classes: ['accent'],
-        });
-        addKeyBtn.connect('clicked', () => {
-            const targetRow = (selectedRowIdx === 0)
-                ? editingLayout.numberRow
-                : editingLayout.mainRows[selectedRowIdx - 1];
-
-            const newKey = {
-                code: 0,
-                label: 'New',
-                shift: '',
-                altgr: '',
-                width: 1.0,
-                type: 'char',
-                behavior: 'normal',
-                bgColor: '',
-                textColor: '',
-                activeColor: '',
-            };
-            targetRow.push(newKey);
-            selectedKeyIdx = targetRow.length - 1;
-            renderVisualKeyboard();
-            updateInspector();
-        });
-        toolbarRow2.append(addKeyBtn);
-
-        const deleteToolbarBtn = new Gtk.Button({
-            label: _('- Delete Key'),
-            css_classes: ['destructive-action'],
-        });
-        deleteToolbarBtn.connect('clicked', () => {
-            const row = getCurrentRow();
-            if (row && row.length > 1) {
-                row.splice(selectedKeyIdx, 1);
-                selectedKeyIdx = Math.max(0, selectedKeyIdx - 1);
+        const startFrom = (key) => {
+            const apply = () => {
+                editingLayout = freshCopy(key);
+                selectedRowIdx = 0;
+                selectedKeyIdx = 0;
                 renderVisualKeyboard();
                 updateInspector();
+            };
+            if (!isDirty()) {
+                apply();
+                return;
             }
+            const dlg = new Adw.AlertDialog({
+                heading: _('Discard unsaved changes?'),
+                body: _('Starting over replaces the layout you are editing.'),
+            });
+            dlg.add_response('cancel', _('Cancel'));
+            dlg.add_response('discard', _('Discard'));
+            dlg.set_response_appearance('discard', Adw.ResponseAppearance.DESTRUCTIVE);
+            dlg.set_default_response('cancel');
+            dlg.set_close_response('cancel');
+            dlg.connect('response', (d, response) => {
+                if (response === 'discard')
+                    apply();
+            });
+            dlg.present(window);
+        };
+        const startRow = new Adw.ActionRow({
+            title: _('Start over from'),
+            subtitle: _('Tablet keeps its long-press symbols and corner hints'),
         });
-        toolbarRow2.append(deleteToolbarBtn);
-
-        const saveApplyBtn = new Gtk.Button({
-            label: _('Save and Apply'),
-            css_classes: ['suggested-action'],
-        });
-        saveApplyBtn.connect('clicked', () => {
-            saveCustomLayout(editingLayout);
-            settings.set_string('layout-variant', 'custom');
-            // Bump token to trigger live reload in keyboard.js immediately!
-            const token = (settings.get_int('custom-layout-token') || 0) + 1;
-            settings.set_int('custom-layout-token', token);
-
-            if (layoutSelectorRow) {
-                layoutSelectorRow.selected = 3;   // Custom Layout
-            }
-            if (window.add_toast) {
-                window.add_toast(new Adw.Toast({
-                    title: _('Custom layout saved and applied live!'),
-                }));
-            }
-        });
-        toolbarRow2.append(saveApplyBtn);
-        mainToolbarBox.append(toolbarRow2);
-
-        const actionRow = new Adw.ActionRow();
-        actionRow.set_child(mainToolbarBox);
-        actionsGroup.add(actionRow);
+        const startBox = new Gtk.Box({ spacing: 6, valign: Gtk.Align.CENTER });
+        for (const [key, label] of [['us', _('US')], ['phone', _('Tablet')]]) {
+            const b = new Gtk.Button({ label });
+            b.connect('clicked', () => startFrom(key));
+            startBox.append(b);
+        }
+        startRow.add_suffix(startBox);
+        actionsGroup.add(startRow);
 
         // Group 2: Anteprima Interattiva della Tastiera (Scrollable & Responsive)
         const previewGroup = new Adw.PreferencesGroup({
-            title: _('Interactive Preview (Click a key to select it)'),
+            title: _('Preview'),
         });
         page3.add(previewGroup);
 
@@ -834,14 +758,13 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
 
         // Group 3: Proprietà Tasto Selezionato (Inspector)
         const inspectorGroup = new Adw.PreferencesGroup({
-            title: _('Selected Key Properties'),
-            description: _('Edit the values of the key selected in the preview above'),
+            title: _('Selected Key'),
         });
         page3.add(inspectorGroup);
 
         // Label Entry
         const labelRow = new Adw.EntryRow({
-            title: _('Main Label'),
+            title: _('Label'),
         });
         labelRow.connect('changed', () => {
             if (updatingInspector) return;
@@ -894,8 +817,8 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
 
         // Key Width (Flex multiplier)
         const keyWidthRow = new Adw.SpinRow({
-            title: _('Relative width (Flex units)'),
-            subtitle: _('Independent horizontal size (e.g. 1.0 standard, 1.5 tab, 6.5 space)'),
+            title: _('Width (key units)'),
+            subtitle: _('1 is a letter key, 1.5 Tab, 6.5 Space'),
             adjustment: new Gtk.Adjustment({
                 lower: 0.4,
                 upper: 8.0,
@@ -916,8 +839,8 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
 
         // Key Linux Evdev Code
         const keycodeRow = new Adw.SpinRow({
-            title: _('Linux Key Code (Evdev Keycode)'),
-            subtitle: _('Numeric key value (e.g. 16 for Q, 57 for Space, 14 for Backspace)'),
+            title: _('Key code (evdev)'),
+            subtitle: _('For example 16 is Q, 57 Space, 14 Backspace'),
             adjustment: new Gtk.Adjustment({
                 lower: 0,
                 upper: 255,
@@ -935,10 +858,10 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
 
         // Behavior Mode (Normale vs Toggle ON/OFF)
         const behaviorRow = new Adw.ComboRow({
-            title: _('Key Behavior'),
-            subtitle: _('Choose whether the key works with a normal tap/press or as an ON/OFF switch'),
+            title: _('Behavior'),
+            subtitle: _('On/off switch: toggles on each tap instead of repeating when held'),
             model: new Gtk.StringList({
-                strings: ['Normal (Press / Continuous repeat)', 'ON/OFF Switch (Toggles on each tap)']
+                strings: [_('Normal'), _('On/off switch')]
             }),
         });
         behaviorRow.connect('notify::selected', () => {
@@ -1036,7 +959,7 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
             halign: Gtk.Align.CENTER,
         });
 
-        const moveLeftBtn = new Gtk.Button({ label: _('<- Left') });
+        const moveLeftBtn = new Gtk.Button({ label: _('← Left') });
         moveLeftBtn.connect('clicked', () => {
             const row = getCurrentRow();
             if (row && selectedKeyIdx > 0) {
@@ -1049,7 +972,7 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
         });
         moveDirsBox.append(moveLeftBtn);
 
-        const moveRightBtn = new Gtk.Button({ label: _('-> Right') });
+        const moveRightBtn = new Gtk.Button({ label: _('→ Right') });
         moveRightBtn.connect('clicked', () => {
             const row = getCurrentRow();
             if (row && selectedKeyIdx < row.length - 1) {
@@ -1062,7 +985,7 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
         });
         moveDirsBox.append(moveRightBtn);
 
-        const moveUpBtn = new Gtk.Button({ label: _('^ Row Up') });
+        const moveUpBtn = new Gtk.Button({ label: _('↑ Row up') });
         moveUpBtn.connect('clicked', () => {
             if (selectedRowIdx > 0) {
                 const currRow = getCurrentRow();
@@ -1077,7 +1000,7 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
         });
         moveDirsBox.append(moveUpBtn);
 
-        const moveDownBtn = new Gtk.Button({ label: _('v Row Down') });
+        const moveDownBtn = new Gtk.Button({ label: _('↓ Row down') });
         moveDownBtn.connect('clicked', () => {
             const maxRow = (editingLayout.mainRows ? editingLayout.mainRows.length : 4);
             if (selectedRowIdx < maxRow) {
@@ -1093,6 +1016,69 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
         });
         moveDirsBox.append(moveDownBtn);
         moveContainer.append(moveDirsBox);
+
+        // Add / delete (delete can be undone from the toast)
+        const editBox = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            spacing: 6,
+            halign: Gtk.Align.CENTER,
+        });
+        const addKeyBtn = new Gtk.Button({ label: _('Add key after') });
+        addKeyBtn.connect('clicked', () => {
+            const targetRow = getCurrentRow();
+            if (!targetRow)
+                return;
+            targetRow.splice(selectedKeyIdx + 1, 0, {
+                code: 0,
+                label: 'New',
+                shift: '',
+                altgr: '',
+                width: 1.0,
+                type: 'char',
+                behavior: 'normal',
+                bgColor: '',
+                textColor: '',
+                activeColor: '',
+            });
+            selectedKeyIdx++;
+            renderVisualKeyboard();
+            updateInspector();
+        });
+        editBox.append(addKeyBtn);
+
+        const deleteKeyBtn = new Gtk.Button({
+            label: _('Delete key'),
+            css_classes: ['destructive-action'],
+        });
+        deleteKeyBtn.connect('clicked', () => {
+            const row = getCurrentRow();
+            if (!row || row.length <= 1)
+                return;
+            const layoutRef = editingLayout;
+            const rIdx = selectedRowIdx;
+            const kIdx = selectedKeyIdx;
+            const [removed] = row.splice(kIdx, 1);
+            selectedKeyIdx = Math.max(0, kIdx - 1);
+            renderVisualKeyboard();
+            updateInspector();
+            const toast = new Adw.Toast({
+                title: _('Key deleted: %s').replace('%s', removed.label || '?'),
+                button_label: _('Undo'),
+                timeout: 8,
+            });
+            toast.connect('button-clicked', () => {
+                if (editingLayout !== layoutRef)
+                    return;
+                row.splice(kIdx, 0, removed);
+                selectedRowIdx = rIdx;
+                selectedKeyIdx = kIdx;
+                renderVisualKeyboard();
+                updateInspector();
+            });
+            window.add_toast(toast);
+        });
+        editBox.append(deleteKeyBtn);
+        moveContainer.append(editBox);
 
         const moveActionRow = new Adw.ActionRow();
         moveActionRow.set_child(moveContainer);
@@ -1443,5 +1429,7 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
         settings.connect('changed::font-family', () => {
             renderVisualKeyboard();
         });
+
+        return navPage;
     }
 }

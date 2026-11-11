@@ -130,23 +130,23 @@ The sensitivity of both gestures can be set in pixels per character.
 * **Floating:** a free window you can drag anywhere.
 * **Full width (strut mode):** covers the whole bottom of the screen and pushes windows up so no text field is hidden.
   Keys can stay at normal width, centered.
-* Width as a percentage of the screen in the settings; height set by dragging the bar at the top of the docked keyboard, with a separate height for portrait orientation.
-* Header buttons to switch layout and mode, open the settings, and close the keyboard. The layout button cycles only through the layouts switched on under *Layouts in the header toggle* in the settings.
+* Width and height as a percentage of the screen, with an optional separate height for portrait orientation. The height can also be set by dragging the bar at the top of the docked keyboard.
+* Header buttons to switch layout and mode, open the settings, and close the keyboard. The layout button cycles only through the layouts switched on under *Layout button cycles through* in the settings.
 
 ### Appearance
 * Two key styles: **Fluent** (Windows 11 look) and **Material** (flat phone look that follows the system light/dark style).
 * Adjustable corner radius.
 * Separate horizontal and vertical key gaps, an extra gap below the number row, and padding from the bottom edge.
-* Font: *Atkinson Hyperlegible Next* by default, or any installed font picked from a font chooser, with a text size setting.
+* Font: *Atkinson Hyperlegible Next* when it is installed (otherwise the system font), or any installed font picked from a font chooser, with a text size setting.
   Labels shrink only when they do not fit in the key.
 
 ### Layout editor
-The settings window has a visual editor for a custom layout:
+The settings window has a visual editor for a custom layout (*Look → Layout Studio*):
 * An interactive preview. Click a key to edit it.
 * For each key: its label, its Shift, AltGr and Shift+AltGr characters, its width, its Linux keycode, its color, and whether it is a normal key or a switch.
-* Add or remove keys and rows.
-* Start over from the Italian, US or Tablet layout (*Reset to …*). Starting from Tablet keeps its long-press symbols and corner hints.
-* Changes apply live when saved, with no restart. The custom layout is stored in `~/.config/tabula-osk/`.
+* Add or remove keys (a deleted key can be brought back with *Undo*) and move keys between rows.
+* Start over from the US or Tablet layout. Starting from Tablet keeps its long-press symbols and corner hints. If there are unsaved changes, it asks first.
+* *Save and Use* applies the layout live, with no restart. The custom layout is stored in `~/.config/tabula-osk/`.
 
 ## Changes from Fluent OSK
 
