@@ -476,7 +476,7 @@ export class TabulaKeyboard {
 
         this._isDocked = this._settings.get_boolean('dock-bottom');
         this._dockFullStrip = this._settings.get_boolean('dock-full-strip');
-        this._currentLayoutKey = this._settings.get_string('layout-variant') || 'it';
+        this._currentLayoutKey = this._settings.get_string('layout-variant') || 'phone';
 
         this._registerBundledFonts();
         this._buildUI();
@@ -806,7 +806,7 @@ export class TabulaKeyboard {
             layout = loadCustomLayout();
         }
         if (!layout) {
-            layout = Layouts[this._currentLayoutKey] || Layouts.it;
+            layout = Layouts[this._currentLayoutKey] || Layouts.phone;
         }
         this._layout = layout;
         this._hintActors = [];
@@ -2605,7 +2605,7 @@ export class TabulaKeyboard {
         } catch (e) {}
         let sequence = all.filter(k => chosen.includes(k));
         if (sequence.length === 0)
-            sequence = all;
+            sequence = ['us', 'phone'];
         const idx = sequence.indexOf(this._currentLayoutKey);
         // Current layout not in the list: go to the first chosen one
         const nextKey = idx === -1 ? sequence[0] : sequence[(idx + 1) % sequence.length];
