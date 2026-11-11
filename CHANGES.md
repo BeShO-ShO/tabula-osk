@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## 1.3.0 (2026-11-12)
 - **Settings window reorganized** into one scrolling page (no tabs) with five sections: **When It Appears**, **Size and
   Position**, **Layout**, **Typing Help** and **Appearance**. Options that depend on another one sit inside it and are only
   shown when it is on; long explanations moved into (i) popovers that also work with touch. The window can be searched.
@@ -12,6 +12,8 @@
   asks before discarding unsaved edits; a deleted key can be restored with *Undo*; new keys are added after the selected one.
 - The Italian layout is no longer offered in the settings (it stays in the code and is listed only if it is the layout in
   use). New installs start on the Tablet layout, cycling between US and Tablet.
+- README: all screenshots retaken (Tablet with suggestions, long-press accents, Fluent US TKL, settings, Layout Studio);
+  the old demo images from the original project are gone.
 
 ## 1.2.0 (2026-11-06)
 - **Renamed to Tabula OSK** (was Apropos OSK, which also clashed with the `apropos` command). New extension ID
