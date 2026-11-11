@@ -189,21 +189,21 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
         window.search_enabled = true;
-        window.add(this._buildTypingPage(settings));
-        window.add(this._buildShowingPage(settings));
-        window.add(this._buildLookPage(window, settings));
+        // One scrolling page; most detail is folded into expanders
+        const page = new Adw.PreferencesPage();
+        window.add(page);
+        this._addAppearsSections(page, settings);
+        this._addLayoutSection(page, window, settings);
+        this._addTypingHelpSection(page, settings);
+        this._addAppearanceSection(page, settings);
     }
 
     // ==========================================
-    // Page 1: Typing (what the keys do)
+    // Typing help (what the keys do)
     // ==========================================
-    _buildTypingPage(settings) {
-        const page = new Adw.PreferencesPage({
-            title: _('Typing'),
-            icon_name: 'input-keyboard-symbolic',
-        });
+    _addTypingHelpSection(page, settings) {
 
-        const suggestGroup = new Adw.PreferencesGroup({ title: _('Suggestions and Corrections') });
+        const suggestGroup = new Adw.PreferencesGroup({ title: _('Typing Help') });
         page.add(suggestGroup);
 
         const suggestRow = expanderSwitch(settings, 'suggestions-enabled',
@@ -221,8 +221,7 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
             _('Fix misspelled English words on space or punctuation'),
             _('Uses the system spell checker (Enchant/Hunspell). Press Backspace right after a correction to undo it; that word is then left alone. Never used in password, terminal, URL or e-mail fields.')));
 
-        const smartGroup = new Adw.PreferencesGroup({ title: _('Smart Typing') });
-        page.add(smartGroup);
+        const smartGroup = suggestGroup;
 
         smartGroup.add(switchRow(settings, 'auto-capitalize',
             _('Auto-capitalization'),
@@ -244,8 +243,7 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
             _('Hold time (ms)'), _('How long to hold before the row appears'), 150, 900, 25));
         smartGroup.add(longPressRow);
 
-        const keysGroup = new Adw.PreferencesGroup({ title: _('Keys') });
-        page.add(keysGroup);
+        const keysGroup = suggestGroup;
 
         keysGroup.add(switchRow(settings, 'play-sound',
             _('Click sound'), _('A soft click on each key press')));
@@ -264,19 +262,14 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
             _('Backspace swipe (px per character)'), _('Drag left from Backspace to select text to delete'), 8, 45, 2));
         keysGroup.add(repeatRow);
 
-        return page;
     }
 
     // ==========================================
-    // Page 2: Showing (when and where it appears)
+    // When it appears, size and position
     // ==========================================
-    _buildShowingPage(settings) {
-        const page = new Adw.PreferencesPage({
-            title: _('Showing'),
-            icon_name: 'view-reveal-symbolic',
-        });
+    _addAppearsSections(page, settings) {
 
-        const openGroup = new Adw.PreferencesGroup({ title: _('Opening and Closing') });
+        const openGroup = new Adw.PreferencesGroup({ title: _('When It Appears') });
         page.add(openGroup);
 
         const autoShowRow = expanderSwitch(settings, 'auto-show',
@@ -294,7 +287,7 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
         openGroup.add(switchRow(settings, 'show-panel-button',
             _('Top bar button'), _('Keyboard icon in the top bar to open or close it')));
 
-        const placeGroup = new Adw.PreferencesGroup({ title: _('Position and Size') });
+        const placeGroup = new Adw.PreferencesGroup({ title: _('Size and Position') });
         page.add(placeGroup);
 
         // Placement: one choice for the dock-bottom / dock-full-strip / full-strip-centered-keys trio,
@@ -392,17 +385,12 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
         placeGroup.add(spinRow(settings, 'padding-bottom',
             _('Bottom padding (px)'), _('Space between the keys and the bottom edge'), 0, 60, 2));
 
-        return page;
     }
 
     // ==========================================
-    // Page 3: Look (layout, key style, font)
+    // Layout
     // ==========================================
-    _buildLookPage(window, settings) {
-        const page = new Adw.PreferencesPage({
-            title: _('Look'),
-            icon_name: 'preferences-desktop-appearance-symbolic',
-        });
+    _addLayoutSection(page, window, settings) {
 
         const layoutGroup = new Adw.PreferencesGroup({ title: _('Layout') });
         page.add(layoutGroup);
@@ -486,8 +474,13 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
             window.push_subpage(studioPage);
         });
         layoutGroup.add(studioRow);
+    }
 
-        const keysGroup = new Adw.PreferencesGroup({ title: _('Keys') });
+    // ==========================================
+    // Appearance (key style, font, spacing)
+    // ==========================================
+    _addAppearanceSection(page, settings) {
+        const keysGroup = new Adw.PreferencesGroup({ title: _('Appearance') });
         page.add(keysGroup);
 
         const themeRow = new Adw.ComboRow({
@@ -619,11 +612,10 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
         modColorsRow.add_row(modTextPicker.row);
         keysGroup.add(modColorsRow);
 
-        return page;
     }
 
     // ==========================================
-    // Layout Studio (sub-page of Look)
+    // Layout Studio (sub-page of the Layout section)
     // ==========================================
     _buildLayoutStudioPage(window, settings) {
         const page3 = new Adw.PreferencesPage();
