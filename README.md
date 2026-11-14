@@ -92,6 +92,7 @@ and the *Atkinson Hyperlegible Next* font for the default key labels. If that fo
 | :--- | :--- | :--- |
 | `Space` | drag left or right | moves the text cursor one character per step |
 | `Backspace` | drag to the left | selects the text before the cursor, deletes it on release |
+| letters | slide across them (swipe typing, optional) | types the word; see below |
 
 The sensitivity of both gestures can be set in pixels per character.
 
@@ -103,6 +104,9 @@ The sensitivity of both gestures can be set in pixels per character.
   While the keyboard is open the input method switches to Typing Booster, and it switches back when the keyboard closes.
   It is not used in URL, e-mail, password, PIN, number or terminal fields, so browser address-bar completion keeps working.
   If Typing Booster is not installed, the built-in list is used.
+* **Swipe typing (English, optional):** turn it on in Settings → Typing Help. Slide from the first letter across the others and
+  lift your finger: the word is typed with a space, and three other guesses appear in the suggestion bar (tap one to swap it in).
+  Backspace right after a swipe deletes the whole word. Taps and holds for accents work as before.
 * **Privacy:** nothing you type is logged. Password and PIN fields are never recorded and never show suggestions.
 * **Long-press for accents and symbols (Tablet layout):** hold a key, slide to a character and let go. Each key shows its symbol
   in the corner, mostly as on Gboard (`e` → `|`, `t` → `[`, `m` → `?` …; no symbol appears twice, so anything a key already gives with Shift is left out and those keys offer `°` `≠` `±` `©` `€` `£` `¥` `•` `…` `×` `÷` instead; `?` stays on `m` as on Gboard), followed by the accented letters from GNOME's own keyboard data (`e` → `è é ê ë ē`).
@@ -181,6 +185,10 @@ GNOME Shell release is supported. Help with reviewing and maintaining the code i
   [Tatoeba](https://tatoeba.org), licensed [CC BY 2.0 FR](https://creativecommons.org/licenses/by/2.0/fr/).
   Changes: only the 3,000 most common previous words and their 6 most common next words kept, limited to the
   `words-freq-en.txt` vocabulary (so offensive words stay out), names dropped, a few entries hand-picked.
+* Swipe typing (`swipe.js`) is ported from the statistical glide typing classifier of
+  [FlorisBoard](https://github.com/florisboard/florisboard), Copyright (C) The FlorisBoard Contributors, licensed
+  [Apache-2.0](LICENSE-Apache-2.0) (based on Étienne Desticourt's write-up in AnySoftKeyboard PR #1870). Changes are listed
+  at the top of `swipe.js`; the port is distributed under GPLv3 as part of this extension.
 * Long-press accents are read at runtime from GNOME Shell's own on-screen keyboard layouts (GPL-2.0-or-later); nothing is copied.
 
 ## License

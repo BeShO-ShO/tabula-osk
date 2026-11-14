@@ -10,6 +10,7 @@ import { getInputSourceManager } from 'resource:///org/gnome/shell/ui/status/key
 import { Layouts, loadCustomLayout } from './layouts.js';
 import * as TL from './textlogic.js';
 import { SpellChecker } from './spell.js';
+import { SwipeDecoder } from './swipe.js';
 
 // Characters after which a just-typed word is checked by autocorrect
 const AC_TERMINATORS = new Set([' ', '.', ',', '!', '?', ';', ':']);
@@ -1742,6 +1743,13 @@ export class TabulaKeyboard {
             return;
         }
 
+        // Backspace right after a swipe: the whole swiped word goes
+        if (keyDef.type === 'backspace' && this._swLast && this._swLast.seq === this._keySeq - 1 &&
+            this._swUndoFits()) {
+            this._swUndo(btn);
+            return;
+        }
+
         // Gesture swipe backspace con cattura continua
         if (keyDef.type === 'backspace') {
             this._startGesture('backspace', btn, event);
@@ -1808,6 +1816,13 @@ export class TabulaKeyboard {
             return;
         }
 
+        // Swipe typing: a letter waits to see whether it is a tap, a hold or a swipe
+        if (this._swEligible(btn)) {
+            this._startGesture(this._lpEligible(btn) ? 'longpress' : 'letter', btn, event);
+            this._swBegin(btn, event);
+            return;
+        }
+
         // Keys with accents/symbols: wait to see whether this is a tap or a long press
         if (this._lpEligible(btn)) {
             this._startGesture('longpress', btn, event);
@@ -1820,6 +1835,286 @@ export class TabulaKeyboard {
         if (!['fn', 'mod', 'ctrl', 'alt', 'super', 'shift', 'caps', 'altgr'].includes(keyDef.type)) {
             this._startKeyRepeat(keyDef);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Swipe typing: slide across the letters, the word is typed on release
+    // ------------------------------------------------------------------
+    _swOn() {
+        try {
+            return this._settings.get_boolean('swipe-typing');
+        } catch (e) {
+            return false;
+        }
+    }
+
+    _swEligible(btn) {
+        return this._swOn() && this._isLetterDef(btn._keyDef) && !this.fnActive &&
+            !this._leftCtrlActive && !this._rightCtrlActive && !this.altActive && !this._superDown &&
+            this._fieldTypeAllowed();
+    }
+
+    _swBegin(btn, event) {
+        const [x, y] = event.get_coords();
+        this._sw = { pts: [[x, y]], x0: x, y0: y, kw: btn._keyW || btn.width || 60, area: null };
+    }
+
+    // true when the motion belongs to a swipe (started or running)
+    _swMotion(x, y) {
+        const sw = this._sw;
+        const g = this._activeGesture;
+        if (g === 'longpress' && this._lp && this._lp.popup) {
+            this._swClear();   // the accent row is open: the finger is choosing from it
+            return false;
+        }
+        if (g !== 'swipe' && g !== 'longpress' && g !== 'letter')
+            return false;
+        const [lx, ly] = sw.pts[sw.pts.length - 1];
+        if (Math.hypot(x - lx, y - ly) >= 2)
+            sw.pts.push([x, y]);
+        if (g !== 'swipe') {
+            if (Math.hypot(x - sw.x0, y - sw.y0) < 0.6 * sw.kw)
+                return false;
+            // Left the key: a swipe, not a tap or a hold
+            if (this._lp) {
+                this._lpDispose(this._lp);
+                this._lp = null;
+            }
+            this._activeGesture = 'swipe';
+            const btn = this._gestureBtn;
+            if (btn) {
+                btn.remove_style_pseudo_class('pressed');
+                this._updateKeyStyle(btn, false);
+            }
+            this._swTrailShow();
+            this._swEnsureDecoder();
+        }
+        sw.area?.queue_repaint();
+        return true;
+    }
+
+    _swClear() {
+        const sw = this._sw;
+        this._sw = null;
+        if (sw?.area) {
+            sw.area.destroy();
+            sw.area = null;
+        }
+    }
+
+    _swTrailShow() {
+        const sw = this._sw;
+        if (!sw || sw.area || !this.actor)
+            return;
+        const [ax, ay] = this.actor.get_transformed_position();
+        const area = new St.DrawingArea({ reactive: false });
+        area.set_position(ax, ay);
+        area.set_size(this.actor.width, this.actor.height);
+        area.connect('repaint', a => this._swPaint(sw, a, ax, ay));
+        Main.layoutManager.uiGroup.add_child(area);
+        sw.area = area;
+    }
+
+    _swPaint(sw, area, ax, ay) {
+        const cr = area.get_context();
+        try {
+            const pts = sw.pts;
+            if (pts.length < 2)
+                return;
+            let c = [0.12, 0.59, 0.94, 0.75];
+            if (this._isMaterial())
+                c = this._isLight() ? [0.04, 0.34, 0.82, 0.7] : [0.66, 0.78, 0.98, 0.75];
+            cr.setSourceRGBA(c[0], c[1], c[2], c[3]);
+            cr.setLineWidth(Math.max(4, Math.min(10, sw.kw * 0.1)));
+            cr.setLineCap(1);    // round
+            cr.setLineJoin(1);   // round
+            cr.moveTo(pts[0][0] - ax, pts[0][1] - ay);
+            for (let i = 1; i < pts.length; i++)
+                cr.lineTo(pts[i][0] - ax, pts[i][1] - ay);
+            cr.stroke();
+        } finally {
+            cr.$dispose();
+        }
+    }
+
+    _swEnsureDecoder() {
+        if (!this._swDecoder) {
+            this._loadFreq();
+            this._swDecoder = new SwipeDecoder(this._freq ? [...this._freq._f.entries()] : []);
+            this._swKeySig = '';
+        }
+        // Key centres relative to the first letter key, so moving the keyboard keeps them
+        const keys = [];
+        let ox = null, oy = 0;
+        for (const btn of this._keyActors) {
+            const def = btn._keyDef;
+            if (!this._isLetterDef(def) || !btn.mapped)
+                continue;
+            const [x, y] = btn.get_transformed_position();
+            if (ox === null) {
+                ox = x;
+                oy = y;
+            }
+            const w = btn._keyW || btn.width, h = btn._keyH || btn.height;
+            keys.push({ ch: def.label.toLowerCase(), x: x - ox + w / 2, y: y - oy + h / 2, w, h });
+        }
+        this._swOrigin = [ox ?? 0, oy];
+        const sig = keys.map(k => `${k.ch}${Math.round(k.x)},${Math.round(k.y)},${Math.round(k.w)},${Math.round(k.h)}`).join(';');
+        if (sig !== this._swKeySig) {
+            this._swDecoder.setKeys(keys);
+            this._swKeySig = sig;
+        }
+    }
+
+    _swFinish(sw) {
+        if (!sw || !this._swDecoder)
+            return;
+        this._keySeq++;
+        this._swEnsureDecoder();
+        const [ox, oy] = this._swOrigin;
+        const pts = sw.pts.map(([x, y]) => [x - ox, y - oy]);
+        const before = this._nwContextText();
+        const ctx = before !== null ? TL.predictionContext(before) : null;
+        // Words the next-word list expects here get a small push
+        let bonus = null;
+        if (ctx && this._nwReady && this._nw) {
+            const preds = this._nw.predict(ctx, 10);
+            if (preds.length)
+                bonus = w => {
+                    const i = preds.indexOf(w);
+                    return i < 0 ? 0 : 0.6 - 0.05 * i;
+                };
+        }
+        const all = this._swDecoder.decode(pts, 12, bonus);
+        if (!all.length)
+            return;
+        // Best word plus three alternatives; one of them starts on another key, in case
+        // the swipe began on a neighbour of the letter that was meant
+        const res = all.slice(0, 4);
+        const first = w => w.charAt(0);
+        if (!res.slice(1).some(r => first(r.word) !== first(res[0].word))) {
+            const other = all.find(r => first(r.word) !== first(res[0].word));
+            if (other) {
+                res.splice(Math.min(3, res.length), 1, other);
+            }
+        }
+        const cased = res.map(r => this._swCase(r.word, ctx));
+        // A space first when the swipe follows a word or punctuation
+        const prefix = (before && /[\p{L}\p{N}.,!?;:)\]}]$/u.test(before)) ? ' ' : '';
+        const word = cased[0];
+        this._swType(0, prefix + word + ' ');
+        this._swAfterCommit(before, ctx, prefix, word);
+        this._swLast = { word, alts: cased.slice(1), seq: this._keySeq, before, ctx, prefix };
+        this._tsRefresh();
+    }
+
+    _swCase(word, ctx) {
+        if (this.capsActive)
+            return word.toUpperCase();
+        if (this.shiftActive)
+            return word.charAt(0).toUpperCase() + word.slice(1);
+        return TL.casePrediction(word, ctx);
+    }
+
+    // Deletes `back` characters, then types `text`, in order
+    _swType(back, text) {
+        const steps = [];
+        for (let i = 0; i < back; i++)
+            steps.push({ code: 14, shift: false });
+        const keys = this._keySteps(text);
+        if (keys) {
+            this._tsPlay(steps.concat(keys));
+            return;
+        }
+        if (steps.length)
+            this._tsPlay(steps);
+        this._oneShot(20 * back + 40, () => this._typeText(text));
+    }
+
+    _swAfterCommit(before, ctx, prefix, word) {
+        const low = word.replace(/’/g, "'").toLowerCase();
+        if (ctx && this._nwReady) {
+            this._nwLearn(ctx, low);
+            this._nwLast = { ctx, word: low };
+        }
+        this._trkSet((before ?? '') + prefix + word + ' ');
+        this._tsBuf = '';
+        this._tsSuppress = false;
+        this._lastCorrection = null;
+        this._lastSpaceUs = GLib.get_monotonic_time();
+        this._lastSpaceSeq = this._keySeq;
+        if (this._releaseOneShotMods()) {
+            this._updateModifierUI();
+            this._updateLabels();
+        }
+        this._acUpdate();
+    }
+
+    _swAltsActive() {
+        const l = this._swLast;
+        return !!(l && l.seq === this._keySeq && l.alts.length);
+    }
+
+    _swShowAlts() {
+        if (!this._swAltsActive())
+            return false;
+        const alts = this._swLast.alts;
+        for (const b of this._suggestBtns) {
+            b.visible = b._tsRank >= 0;
+            const w = alts[b._tsRank] || '';
+            b.label = w;
+            b.reactive = !!w;
+            b.opacity = w ? 255 : 0;
+        }
+        return true;
+    }
+
+    // The text before the cursor still ends with the swiped word (the cursor may have
+    // been moved with a hardware keyboard). Apps that do not report their text: trust it.
+    _swUndoFits() {
+        const before = this._surroundingBefore();
+        if (before === null)
+            return true;
+        return before.endsWith(this._swLast.word + ' ');
+    }
+
+    // Backspace after a swipe: delete the word and its space, forget the word pair
+    _swUndo(btn) {
+        const l = this._swLast;
+        this._swLast = null;
+        this._swUndoBtn = btn;
+        this._swType(Array.from(l.word).length + 1, '');
+        if (l.ctx && this._nwReady)
+            this._nwLearn(l.ctx, l.word.toLowerCase(), -1);
+        this._nwLast = null;
+        this._trkSet((l.before ?? '') + l.prefix);
+        this._tsBuf = '';
+        this._tsSuppress = false;
+        this._lastCorrection = null;
+        this._lastSpaceSeq = -1;
+        this._acUpdate();
+        this._tsRefresh();
+    }
+
+    // An alternative from the bar replaces the swiped word
+    _swReplace(alt) {
+        const l = this._swLast;
+        this._swLast = null;
+        this._keySeq++;
+        // Same capitalization as the word it replaces
+        const first = l.word.charAt(0);
+        let w = alt;
+        if (l.word.length > 1 && l.word === l.word.toUpperCase())
+            w = alt.toUpperCase();
+        else if (first !== first.toLowerCase())
+            w = alt.charAt(0).toUpperCase() + alt.slice(1);
+        this._swType(Array.from(l.word).length + 1, w + ' ');
+        if (l.ctx && this._nwReady) {
+            const low = l.word.toLowerCase();
+            this._nwLearn(l.ctx, low, -1);
+        }
+        this._swAfterCommit(l.before, l.ctx, l.prefix, w);
+        this._tsRefresh();
     }
 
     _splitCode(btn, keyDef, event) {
@@ -1921,6 +2216,7 @@ export class TabulaKeyboard {
     }
 
     _cleanupStageGesture() {
+        this._swClear();
         if (this._lp) {
             this._lpDispose(this._lp);
             this._lp = null;
@@ -1951,7 +2247,8 @@ export class TabulaKeyboard {
             if (type === Clutter.EventType.TOUCH_BEGIN) {
                 // Fast two-thumb typing: a new touch while a key waits for long-press
                 // turns that key into a normal tap and lets the new touch through
-                if (this._activeGesture === 'longpress' && !(this._lp && this._lp.popup)) {
+                if ((this._activeGesture === 'longpress' || this._activeGesture === 'letter') &&
+                    !(this._lp && this._lp.popup)) {
                     this._endGesture(ev);
                     return Clutter.EVENT_PROPAGATE;
                 }
@@ -2002,6 +2299,9 @@ export class TabulaKeyboard {
         if (!btn || !btn._down) return;
 
         const [currentX, currentY] = event.get_coords();
+
+        if (this._sw && this._swMotion(currentX, currentY))
+            return;
 
         if (this._activeGesture === 'longpress') {
             this._lpMotion(event);
@@ -2084,6 +2384,8 @@ export class TabulaKeyboard {
         const gesture = this._activeGesture;
         const btn = this._gestureBtn;
         const lp = this._lp;
+        const sw = this._sw;
+        this._swClear();   // removes the trail; the points stay in `sw`
         this._lp = null;
         this._cleanupStageGesture();
 
@@ -2094,6 +2396,23 @@ export class TabulaKeyboard {
         btn._down = false;
         btn.remove_style_pseudo_class('pressed');
         this._updateKeyStyle(btn, false);
+
+        if (gesture === 'swipe') {
+            try {
+                const [x, y] = event.get_coords();
+                sw.pts.push([x, y]);
+            } catch (e) {}
+            this._swFinish(sw);
+            return;
+        }
+
+        if (gesture === 'letter') {
+            // Released without a swipe: an ordinary tap
+            this._pressRegular(btn._keyDef);
+            btn._down = true;
+            this._onKeyRelease(btn, btn._keyDef, event);
+            return;
+        }
 
         if (gesture === 'longpress') {
             // The timer can fire late-but-first when the Shell was busy (e.g. the first app
@@ -2200,6 +2519,14 @@ export class TabulaKeyboard {
         }
         if (this._activeGesture && this._gestureBtn === btn) {
             this._endGesture(event);
+            return;
+        }
+        if (this._swUndoBtn === btn) {
+            // The press already deleted the swiped word
+            this._swUndoBtn = null;
+            btn._down = false;
+            btn.remove_style_pseudo_class('pressed');
+            this._updateKeyStyle(btn, false);
             return;
         }
         btn._down = false;
@@ -3180,6 +3507,12 @@ export class TabulaKeyboard {
             btn.visible = btn._tsRank >= 0;
             btn.opacity = 0;
             btn.connect('clicked', () => {
+                if (this._swAltsActive()) {
+                    const w = this._swLast.alts[btn._tsRank];
+                    if (w)
+                        this._swReplace(w);
+                    return;
+                }
                 if (this._nwShown && this._nwShown.length) {
                     const w = this._nwShown[btn._tsRank];
                     if (w)
@@ -3382,6 +3715,7 @@ export class TabulaKeyboard {
 
     // The text before the cursor is no longer known: stay quiet until the next word boundary
     _tsUnknown() {
+        this._swLast = null;
         this._trkUnknown();
         this._tsReset(true);
     }
@@ -3862,6 +4196,8 @@ export class TabulaKeyboard {
 
     _tsRefresh() {
         if (!this._suggestBtns)
+            return;
+        if (this._swShowAlts())
             return;
         if (this._tbOn()) {
             this._nwHookIm();
@@ -4796,6 +5132,8 @@ export class TabulaKeyboard {
         this._endHandleDrag();
         this._deadZoneDropAll();
         this._cleanupStageGesture();
+        this._swDecoder = null;
+        this._swLast = null;
         this._stopKeyRepeat();
         this._superLpCancel();
         if (this._superFallbackId) {
