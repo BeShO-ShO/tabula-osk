@@ -226,10 +226,10 @@ Layouts.phone = {
             // Tap = Super (Activities / Super+key combos); hold = sticky Alt latch
             { code: 125, label: "❖", width: 1.25, type: "super", lpAlt: true, hint: "Alt" },
             { code: 53, label: "/", shift: "?" },
-            // Opens the emoji panel (ABC there comes back)
-            { code: 0, label: "☺", width: 1.0, type: "emoji", special: true },
             // Left/Right: slide on the space bar
             { code: 57, label: " ", width: 5.0, type: "space" },
+            // Opens the emoji panel (ABC there comes back)
+            { code: 0, label: "☺", width: 1.0, type: "emoji", special: true },
             // long-press ▲/▼: Page Up/Down; with Shift scrolls terminal history
             { code: 103, label: "▲", width: 1.25, type: "arrow", hint: "PgUp", lpKeys: [{ label: "PgUp", code: 104 }, { label: "⇧PgUp", code: 104, shift: true }] },
             { code: 108, label: "▼", width: 1.25, type: "arrow", hint: "PgDn", lpKeys: [{ label: "⇧PgDn", code: 109, shift: true }, { label: "PgDn", code: 109 }], lpDefault: 1 },

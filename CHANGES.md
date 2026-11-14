@@ -1,7 +1,7 @@
 # Changes
 
 ## 1.5.0 (2026-11-15)
-- **Emoji panel** (Tablet layout): the new ☺ key beside the space bar swaps the keys for pages of emoji. Tabs along the
+- **Emoji panel** (Tablet layout): the new ☺ key to the right of the space bar swaps the keys for pages of emoji. Tabs along the
   top pick the category, the first tab holds the emoji you used most recently, and a sideways swipe or the ‹ › buttons
   turn the page. **ABC** returns to the letters; ⌫ deletes. Recently used emoji are kept in
   `~/.config/tabula-osk/emoji-recent.json`. Custom layouts made before this version don't have the key; use *Start over
