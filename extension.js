@@ -118,6 +118,7 @@ export default class TabulaOskExtension extends Extension {
 
         this._autoOpened = false;
         this._lastFocused = false;
+        this._lastTarget = null;
         this._autoHideId = 0;
 
         this._autoPollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 120, () => {
@@ -137,6 +138,9 @@ export default class TabulaOskExtension extends Extension {
                 } catch (err) {
                     this._lastTouchActor = null;
                 }
+            } else if (ev.type() === Clutter.EventType.TOUCH_END) {
+                this._maybeOpenForShellEntryTap();
+                this._maybeOpenForPendingTap();
             }
             return Clutter.EVENT_PROPAGATE;
         });
@@ -189,6 +193,7 @@ export default class TabulaOskExtension extends Extension {
             this._autoOpened = true;
             this._hwClosed = false;
             this._lastFocused = true;
+            this._lastTarget = this._focusTarget();
             return GLib.SOURCE_REMOVE;
         });
     }
@@ -239,6 +244,11 @@ export default class TabulaOskExtension extends Extension {
             GLib.source_remove(this._panelOpenId);
             this._panelOpenId = 0;
         }
+        if (this._pendingTapId) {
+            GLib.source_remove(this._pendingTapId);
+            this._pendingTapId = 0;
+        }
+        this._pendingTarget = null;
         if (this._stockBlockId) {
             GLib.source_remove(this._stockBlockId);
             this._stockBlockId = 0;
@@ -444,11 +454,21 @@ export default class TabulaOskExtension extends Extension {
     _focusGainFromTap() {
         try {
             const f = global.stage.key_focus;
-            // Shell entries (Activities search, run dialog): unchanged behaviour
-            if (f && f instanceof Clutter.Text)
-                return true;
             const now = GLib.get_monotonic_time();
             const recent = t => t && now - t < 1000 * 1000;
+            // Shell entries. The overview focuses its search entry by itself whenever it
+            // opens (Activities, a swipe up from the bottom edge, the dock's app grid
+            // button): only a tap on the entry opens the keyboard there. Elsewhere
+            // (run dialog...): unchanged behaviour.
+            if (f && f instanceof Clutter.Text) {
+                if (!Main.overview.visible)
+                    return true;
+                return !!(recent(this._lastTouchUs) && this._touchedEntry(f));
+            }
+            // In the overview the app window keeps its text focus (and may re-request
+            // the keyboard): nothing there should open it
+            if (Main.overview.visible)
+                return false;
             if (recent(this._wsChangedUs))
                 return false;
             if (!recent(this._focusWinChangedUs))
@@ -467,6 +487,87 @@ export default class TabulaOskExtension extends Extension {
         } catch (err) {
             return true;
         }
+    }
+
+    // Did the last touch land on the shell entry that owns this text actor?
+    _touchedEntry(text) {
+        const a = this._lastTouchActor;
+        if (!a)
+            return false;
+        const entry = text.get_parent() instanceof St.Entry ? text.get_parent() : text;
+        return entry.contains(a);
+    }
+
+    // A tap on the overview search entry that already has the focus (it takes it when
+    // the overview opens) changes no focus and sends no input-panel request: open here.
+    _maybeOpenForShellEntryTap() {
+        try {
+            if (!this.keyboard || this.keyboard.isOpen || !Main.overview.visible)
+                return;
+            const f = global.stage.key_focus;
+            if (!(f instanceof Clutter.Text && f.editable) || !this._touchedEntry(f))
+                return;
+            if (this._autoHideId) {
+                GLib.source_remove(this._autoHideId);
+                this._autoHideId = 0;
+            }
+            this.keyboard.open();
+            this._autoOpened = true;
+            this._hwClosed = false;
+            this._lastFocused = true;
+            this._lastTarget = this._focusTarget();
+        } catch (err) {}
+    }
+
+    // What holds the text focus: a shell entry, or else the focused window. The shell
+    // shares one input-method focus between all apps, so moving from one app's text
+    // field to another's never looks like "focus gained" without this.
+    _focusTarget() {
+        const f = global.stage.key_focus;
+        if (f && f instanceof Clutter.Text)
+            return f;
+        return global.display.focus_window ?? null;
+    }
+
+    // First tap inside a window that got its text focus without a tap: open once its
+    // text field still has the focus a moment later (a tap elsewhere in the window, e.g.
+    // a web page, moves the focus away first).
+    _maybeOpenForPendingTap() {
+        try {
+            const win = this._pendingTarget;
+            if (!win || !this.keyboard || this.keyboard.isOpen || Main.overview.visible)
+                return;
+            let a = this._lastTouchActor;
+            while (a && !(a instanceof Meta.WindowActor))
+                a = a.get_parent();
+            if (!a || a.get_meta_window() !== win)
+                return;
+            this._pendingTarget = null;
+            if (this._pendingTapId)
+                GLib.source_remove(this._pendingTapId);
+            this._pendingTapId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 200, () => {
+                this._pendingTapId = 0;
+                if (!this.keyboard || this.keyboard.isOpen || Main.overview.visible)
+                    return GLib.SOURCE_REMOVE;
+                if (this._focusTarget() !== win || !this._textFieldFocused() || this._focusInModalDialog())
+                    return GLib.SOURCE_REMOVE;
+                try {
+                    const inhibit = Clutter.InputContentHintFlags.INHIBIT_OSK ?? 0;
+                    if (inhibit && ((Main.inputMethod.contentHints ?? Main.inputMethod.content_hints ?? 0) & inhibit))
+                        return GLib.SOURCE_REMOVE;
+                } catch (err) {}
+                if (this._autoHideId) {
+                    GLib.source_remove(this._autoHideId);
+                    this._autoHideId = 0;
+                }
+                this.keyboard.open();
+                this._autoOpened = true;
+                this._hwClosed = false;
+                this._lastFocused = true;
+                this._lastTarget = win;
+                return GLib.SOURCE_REMOVE;
+            });
+        } catch (err) {}
     }
 
     _textFieldFocused() {
@@ -488,9 +589,12 @@ export default class TabulaOskExtension extends Extension {
             this._autoOpened = false;
         }
         const focused = !inDialog && this._textFieldFocused();
-        if (focused === this._lastFocused)
+        const target = focused ? this._focusTarget() : null;
+        if (focused === this._lastFocused && target === this._lastTarget)
             return;
         this._lastFocused = focused;
+        this._lastTarget = target;
+        this._pendingTarget = null;
         if (!focused)
             this._hwClosed = false;
 
@@ -504,6 +608,12 @@ export default class TabulaOskExtension extends Extension {
                 this._focusGainFromTap()) {
                 this.keyboard.open();
                 this._autoOpened = true;
+            } else if (!this.keyboard.isOpen && target instanceof Meta.Window) {
+                // The window got the focus without a tap on it (picked in the overview,
+                // dock, workspace switch): its text field is focused but the keyboard
+                // stays closed. The first tap inside it should open the keyboard, but
+                // some apps (Ptyxis) only ask for it from the second tap on.
+                this._pendingTarget = target;
             }
         } else if (this._autoOpened) {
             if (this._autoHideId)

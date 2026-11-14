@@ -1,5 +1,16 @@
 # Changes
 
+## 1.4.1 (2026-11-14)
+- **The keyboard pops up when you expect it, and not when you don't** (auto-show fixes, found while using TouchUp's
+  swipe navigation and Dash to Dock):
+  - Opening the overview (Activities, a swipe up from the bottom edge, the dock's app grid button) no longer opens the
+    keyboard, even when the app behind it has a text field focused. Tap the search box to type.
+  - Moving from one app's text field straight into another app's (for example Chrome → Terminal) opens the keyboard on
+    the first tap. Before, it took a second tap, because the shell shares one text focus between all apps.
+  - A window chosen in the overview, from the dock or by switching workspace still doesn't open the keyboard by itself,
+    but the first tap inside it now does when its text field has the focus (some apps, such as Ptyxis, only ask for the
+    keyboard from the second tap on).
+
 ## 1.4.0 (2026-11-14)
 - **Swipe typing** (English, off by default: Settings → Typing Help → *Swipe typing*). Slide across the letters and lift
   your finger: the word is typed with a space after it, with a space first when it follows another word. A trail follows
