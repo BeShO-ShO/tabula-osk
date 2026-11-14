@@ -242,6 +242,10 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
         longPressRow.add_row(spinRow(settings, 'long-press-delay',
             _('Hold time (ms)'), _('How long to hold before the row appears'), 150, 900, 25));
         smartGroup.add(longPressRow);
+        smartGroup.add(switchRow(settings, 'swipe-typing',
+            _('Swipe typing'),
+            _('Slide across the letters to type a word'),
+            _('Start on the first letter, pass over the others and lift your finger: the word is typed with a space after it. Other guesses appear in the suggestion bar; tap one to swap it in. English words only. A short tap or a hold works as before.')));
 
         const keysGroup = suggestGroup;
 

@@ -1,5 +1,21 @@
 # Changes
 
+## 1.4.0 (2026-11-14)
+- **Swipe typing** (English, off by default: Settings → Typing Help → *Swipe typing*). Slide across the letters and lift
+  your finger: the word is typed with a space after it, with a space first when it follows another word. A trail follows
+  the finger. Capitals follow Shift, Caps Lock and the start of a sentence, and the next-word list gives expected words a
+  small push.
+  - Three other guesses appear in the suggestion bar; tap one to swap it in. One of them always starts on a key next to
+    where the swipe began, in case the first letter was missed.
+  - **Backspace right after a swipe deletes the whole word** (and forgets the word pair). Only the first key press after
+    the swipe does this, and only while the text before the cursor still ends with that word.
+  - A tap, a hold for accents (and sliding inside the accent row) and fast two-thumb typing work as before; a touch
+    becomes a swipe only after the finger leaves the key. Works on the Tablet and US layouts and in custom layouts.
+    With swipe typing on, held letters no longer repeat.
+  - The decoder (`swipe.js`) is a JavaScript port of FlorisBoard's statistical glide typing classifier (Apache-2.0),
+    retuned: word frequency weighs less, every key around the start and end of the swipe is considered, and the ends of
+    the swipe count extra. On simulated swipes it picks the right word about 9 times in 10 in about 3–8 ms.
+
 ## 1.3.0 (2026-11-12)
 - **Settings window reorganized** into one scrolling page (no tabs) with five sections: **When It Appears**, **Size and
   Position**, **Layout**, **Typing Help** and **Appearance**. Options that depend on another one sit inside it and are only

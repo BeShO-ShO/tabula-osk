@@ -142,6 +142,10 @@
       <default>true</default>
       <summary>Hold a key for accents and symbols (on layouts that support it)</summary>
     </key>
+    <key name="swipe-typing" type="b">
+      <default>false</default>
+      <summary>Slide across the letters to type a word (English)</summary>
+    </key>
     <key name="long-press-delay" type="i">
       <default>350</default>
       <summary>How long a key must be held before the long-press popup opens (ms)</summary>
