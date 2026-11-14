@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install gjs and GLib tools
+        run: sudo apt-get update && sudo apt-get install -y gjs libglib2.0-bin
+      - name: Syntax check of every module
+        run: |
+          for f in *.js tests/*.js; do
+            cp "$f" /tmp/check.mjs
+            node --check /tmp/check.mjs || { echo "syntax error in $f"; exit 1; }
+          done
+      - name: Settings schema
+        run: glib-compile-schemas --strict --dry-run schemas/
+      - name: Unit tests
+        run: gjs -m tests/unit.js
+      - name: Release zip ships every imported file
+        run: tests/check-pack.sh

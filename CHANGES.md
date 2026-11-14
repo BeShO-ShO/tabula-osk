@@ -1,5 +1,22 @@
 # Changes
 
+## 1.5.0 (2026-11-15)
+- **Emoji panel** (Tablet layout): the new ☺ key beside the space bar swaps the keys for pages of emoji. Tabs along the
+  top pick the category, the first tab holds the emoji you used most recently, and a sideways swipe or the ‹ › buttons
+  turn the page. **ABC** returns to the letters; ⌫ deletes. Recently used emoji are kept in
+  `~/.config/tabula-osk/emoji-recent.json`. Custom layouts made before this version don't have the key; use *Start over
+  from Tablet* in Layout Studio to get it.
+- **Paste button**: for three minutes after you copy some text, a button with its first words appears at the left of the
+  suggestion bar; tap it to paste. The text is only held in memory, is never shown on the lock screen, and anything a
+  password manager marks as secret is ignored. Turn it off in Settings → Typing Help → *Paste button*.
+- **Stay closed in these apps**: Settings → When It Appears → *Pop up on text fields* now has a list of installed apps;
+  the keyboard never opens by itself in the ones you switch on (games, video players, a terminal…). The top bar button
+  still opens it there.
+- **Held letters repeat again with swipe typing on**: on layouts without long-press accents (US), holding a letter in
+  place types it and then repeats it, as it did before swipe typing; sliding off the key still starts a swipe.
+- For developers: `tests/unit.js` (plain `gjs -m`) and a CI workflow that runs it, checks the syntax of every module and
+  that `pack.sh` ships every module the code imports.
+
 ## 1.4.1 (2026-11-14)
 - **The keyboard pops up when you expect it, and not when you don't** (auto-show fixes, found while using TouchUp's
   swipe navigation and Dash to Dock):

@@ -25,6 +25,10 @@ The Tablet layout (Material style), docked, with next-word suggestions in the he
 Hold a key for accents and symbols; slide to one and let go:
 ![Long-press popup with accented e variants](screenshots/long-press.png)
 
+The emoji panel (☺ key), and the paste button that appears after you copy some text:
+![Emoji panel with category tabs covering the key area](screenshots/emoji-panel.png)
+![Paste button showing the copied text at the left of the suggestion bar](screenshots/paste-button.png)
+
 The US TKL layout in the Fluent style:
 ![US TKL layout with Esc, function row keys, arrows and all modifiers](screenshots/fluent-us.png)
 
@@ -84,7 +88,7 @@ and the *Atkinson Hyperlegible Next* font for the default key labels. If that fo
 * **Modifier behavior:** each key can work as a normal key (hold) or as an on/off switch (latch).
 * **Modified-key highlight:** while Shift, AltGr or Fn is active, the keys that change symbol are colored. The colors can be changed.
 * **Super key:** a tap opens the Activities overview, and holding it with another key sends the combination.
-* **Key repeat:** every key repeats when held, with adjustable start delay and speed.
+* **Key repeat:** keys repeat when held (keys with a long-press popup open that instead), with adjustable start delay and speed.
 * **Sound feedback:** an optional soft click on each key press.
 
 ### Gestures
@@ -93,6 +97,7 @@ and the *Atkinson Hyperlegible Next* font for the default key labels. If that fo
 | `Space` | drag left or right | moves the text cursor one character per step |
 | `Backspace` | drag to the left | selects the text before the cursor, deletes it on release |
 | letters | slide across them (swipe typing, optional) | types the word; see below |
+| emoji pages | swipe left or right | next or previous page |
 
 The sensitivity of both gestures can be set in pixels per character.
 
@@ -107,6 +112,10 @@ The sensitivity of both gestures can be set in pixels per character.
 * **Swipe typing (English, optional):** turn it on in Settings → Typing Help. Slide from the first letter across the others and
   lift your finger: the word is typed with a space, and three other guesses appear in the suggestion bar (tap one to swap it in).
   Backspace right after a swipe deletes the whole word. Taps and holds for accents work as before.
+* **Emoji panel (Tablet layout):** the ☺ key beside the space bar swaps the keys for pages of emoji with category tabs and a
+  recently-used tab. **ABC** brings the letters back.
+* **Paste button:** for three minutes after you copy some text, its first words appear as a button at the left of the
+  suggestion bar; tap it to paste. Held in memory only, never shown on the lock screen, and password-manager copies are ignored.
 * **Privacy:** nothing you type is logged. Password and PIN fields are never recorded and never show suggestions.
 * **Long-press for accents and symbols (Tablet layout):** hold a key, slide to a character and let go. Each key shows its symbol
   in the corner, mostly as on Gboard (`e` → `|`, `t` → `[`, `m` → `?` …; no symbol appears twice, so anything a key already gives with Shift is left out and those keys offer `°` `≠` `±` `©` `€` `£` `¥` `•` `…` `×` `÷` instead; `?` stays on `m` as on Gboard), followed by the accented letters from GNOME's own keyboard data (`e` → `è é ê ë ē`).
@@ -125,6 +134,7 @@ The sensitivity of both gestures can be set in pixels per character.
 ### Showing and hiding
 * **Opens automatically** when a text field gets focus and closes when you leave it. The stock GNOME keyboard is blocked while this is on.
 * **Touch only (optional):** opens automatically only when you tapped the field with a finger or pen, not when you got there with the mouse, touchpad or keyboard.
+* **Stay closed in these apps (optional):** pick installed apps where the keyboard should never open by itself; the top bar button still opens it there.
 * **Hide on hardware key (optional):** an automatically opened keyboard closes as soon as you type on a physical keyboard, such as a Type Cover.
 * **System dialogs:** in system pop-ups such as password prompts, the stock GNOME keyboard is used, because those dialogs block other keyboards.
 * **Lock screen:** it also works on the lock screen, so you can type your password there.
@@ -189,6 +199,9 @@ GNOME Shell release is supported. Help with reviewing and maintaining the code i
   [FlorisBoard](https://github.com/florisboard/florisboard), Copyright (C) The FlorisBoard Contributors, licensed
   [Apache-2.0](LICENSE-Apache-2.0) (based on Étienne Desticourt's write-up in AnySoftKeyboard PR #1870). Changes are listed
   at the top of `swipe.js`; the port is distributed under GPLv3 as part of this extension.
+* `emoji-data.txt` (emoji panel) is generated from Unicode's `emoji-test.txt` 16.0, Copyright © Unicode, Inc.,
+  [Unicode License v3](https://www.unicode.org/license.txt). Changes: fully-qualified emoji only, skin-tone variants left out,
+  one line per group.
 * Long-press accents are read at runtime from GNOME Shell's own on-screen keyboard layouts (GPL-2.0-or-later); nothing is copied.
 
 ## License

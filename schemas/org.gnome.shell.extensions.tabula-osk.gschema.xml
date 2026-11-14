@@ -146,6 +146,14 @@
       <default>false</default>
       <summary>Slide across the letters to type a word (English)</summary>
     </key>
+    <key name="clipboard-chip" type="b">
+      <default>true</default>
+      <summary>Offer recently copied text as a paste button in the suggestion bar</summary>
+    </key>
+    <key name="auto-show-blocked-apps" type="as">
+      <default>[]</default>
+      <summary>App IDs (desktop file names) where the keyboard never opens by itself</summary>
+    </key>
     <key name="long-press-delay" type="i">
       <default>350</default>
       <summary>How long a key must be held before the long-press popup opens (ms)</summary>

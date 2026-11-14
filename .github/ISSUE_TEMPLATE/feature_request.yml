@@ -1,0 +1,15 @@
+name: Feature request
+description: An idea for the keyboard
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like, and when would you use it?
+    validations:
+      required: true
+  - type: textarea
+    id: other
+    attributes:
+      label: How do other keyboards do it?
+      description: Gboard, the Windows touch keyboard, another GNOME extension…

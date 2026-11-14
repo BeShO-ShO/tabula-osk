@@ -2,6 +2,7 @@ import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import St from 'gi://St';
+import Meta from 'gi://Meta';
 import IBus from 'gi://IBus';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as BoxPointer from 'resource:///org/gnome/shell/ui/boxpointer.js';
@@ -11,6 +12,10 @@ import { Layouts, loadCustomLayout } from './layouts.js';
 import * as TL from './textlogic.js';
 import { SpellChecker } from './spell.js';
 import { SwipeDecoder } from './swipe.js';
+import { EmojiPanel } from './emoji.js';
+
+// How long a copied text is offered as a paste button (µs)
+const CLIP_TTL_US = 3 * 60 * 1000 * 1000;
 
 // Characters after which a just-typed word is checked by autocorrect
 const AC_TERMINATORS = new Set([' ', '.', ',', '!', '?', ';', ':']);
@@ -765,6 +770,7 @@ export class TabulaKeyboard {
     }
 
     _buildKeyboardLayout() {
+        this._emojiDrop();
         if (this._keysBox) {
             this.actor.remove_child(this._keysBox);
             this._keysBox.destroy();
@@ -1510,6 +1516,8 @@ export class TabulaKeyboard {
     }
 
     _deadZonePress(event) {
+        if (this._emojiOpen)
+            return false;
         const [x, y] = event.get_coords();
         const btn = this._deadZoneKey(x, y);
         if (!btn)
@@ -1642,6 +1650,10 @@ export class TabulaKeyboard {
         if (this._superDown && keyDef.type !== 'super' && keyDef.type !== 'fn_toggle' && keyDef.label !== 'FN') {
             this._engageSuper();
         }
+
+        // Emoji key: the panel opens on release
+        if (keyDef.type === 'emoji')
+            return;
 
         // Super: tap al rilascio, hold per combo
         if (keyDef.type === 'super') {
@@ -2179,6 +2191,7 @@ export class TabulaKeyboard {
 
     _startGesture(type, btn, event) {
         this._cleanupStageGesture();
+        this._letterHeld = false;
 
         this._activeGesture = type;
         this._gestureBtn = btn;
@@ -2198,6 +2211,19 @@ export class TabulaKeyboard {
                 return GLib.SOURCE_REMOVE;
             });
             this._lp = lp;
+        } else if (type === 'letter') {
+            // Held in place (no swipe): from here on an ordinary held key that repeats
+            const delay = this._settings.get_int('repeat-delay') || 320;
+            this._letterHoldId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
+                this._letterHoldId = 0;
+                if (this._activeGesture === 'letter' && this._gestureBtn === btn && btn._down) {
+                    this._swClear();
+                    this._letterHeld = true;
+                    this._pressRegular(btn._keyDef);
+                    this._startKeyRepeat(btn._keyDef);
+                }
+                return GLib.SOURCE_REMOVE;
+            });
         } else if (type === 'space') {
             this._spaceStartX = x;
             this._spaceDrifting = false;
@@ -2217,6 +2243,10 @@ export class TabulaKeyboard {
 
     _cleanupStageGesture() {
         this._swClear();
+        if (this._letterHoldId) {
+            GLib.source_remove(this._letterHoldId);
+            this._letterHoldId = 0;
+        }
         if (this._lp) {
             this._lpDispose(this._lp);
             this._lp = null;
@@ -2385,6 +2415,8 @@ export class TabulaKeyboard {
         const btn = this._gestureBtn;
         const lp = this._lp;
         const sw = this._sw;
+        const held = this._letterHeld;
+        this._letterHeld = false;
         this._swClear();   // removes the trail; the points stay in `sw`
         this._lp = null;
         this._cleanupStageGesture();
@@ -2407,8 +2439,9 @@ export class TabulaKeyboard {
         }
 
         if (gesture === 'letter') {
-            // Released without a swipe: an ordinary tap
-            this._pressRegular(btn._keyDef);
+            // Released without a swipe: an ordinary tap (or the end of a held, repeating key)
+            if (!held)
+                this._pressRegular(btn._keyDef);
             btn._down = true;
             this._onKeyRelease(btn, btn._keyDef, event);
             return;
@@ -2529,9 +2562,16 @@ export class TabulaKeyboard {
             this._updateKeyStyle(btn, false);
             return;
         }
+        const wasDown = btn._down;
         btn._down = false;
         btn.remove_style_pseudo_class('pressed');
         this._updateKeyStyle(btn, false);
+
+        if (keyDef.type === 'emoji') {
+            if (wasDown)
+                this._emojiShow(true);
+            return;
+        }
 
         if (this.fnActive && btn._isFnNumberKey) {
             this._stopKeyRepeat();
@@ -2647,6 +2687,7 @@ export class TabulaKeyboard {
     // Reset gesture scorrimento/selezione e rilascio tasti
     _resetGestureStates() {
         this._cleanupStageGesture();
+        this._letterHeld = false;
         this._stopKeyRepeat();
 
         if (this._spaceDrifting || (this._spaceButton && this._spaceButton.has_style_class_name('tabula-osk-space-sliding'))) {
@@ -3548,6 +3589,193 @@ export class TabulaKeyboard {
         this._tsBuildBarWidgets();
         // Lives in the header row, between the layout button and the right-hand buttons
         this._header.insert_child_above(this._suggestBar, this._layoutLabel);
+        this._clipBuild();
+    }
+
+    // ------------------------------------------------------------------
+    // Paste button: a text copied in the last few minutes is offered at the left of the
+    // suggestion bar. Kept in memory only; never shown on the lock screen, and text that a
+    // password manager marked as secret is ignored.
+    // ------------------------------------------------------------------
+    _clipOn() {
+        try {
+            return this._settings.get_boolean('clipboard-chip');
+        } catch (e) {
+            return false;
+        }
+    }
+
+    _clipBuild() {
+        this._clipChip = new St.Button({
+            label: '',
+            style_class: 'tabula-osk-clip-chip',
+            reactive: true,
+            can_focus: false,
+            visible: false,
+            y_expand: true,
+        });
+        this._clipChip.connect('clicked', () => this._clipPaste());
+        this._header.insert_child_below(this._clipChip, this._suggestBar);
+        try {
+            this._clipSel = global.display.get_selection();
+            this._clipSelId = this._clipSel.connect('owner-changed', (sel, type) => {
+                if (type === Meta.SelectionType.SELECTION_CLIPBOARD)
+                    this._clipChanged();
+            });
+        } catch (e) {
+            this._clipSel = null;
+            this._clipSelId = 0;
+        }
+    }
+
+    _clipChanged() {
+        this._clip = null;
+        const stamp = GLib.get_monotonic_time();
+        this._clipStamp = stamp;
+        let mimes = [];
+        try {
+            mimes = this._clipSel.get_mimetypes(Meta.SelectionType.SELECTION_CLIPBOARD) || [];
+        } catch (e) {}
+        const isText = mimes.some(m => m.startsWith('text/plain') || m === 'UTF8_STRING' || m === 'STRING' || m === 'TEXT');
+        if (!this._clipOn() || !isText || mimes.includes('x-kde-passwordManagerHint')) {
+            this._clipSync();
+            return;
+        }
+        St.Clipboard.get_default().get_text(St.ClipboardType.CLIPBOARD, (cb, text) => {
+            if (this._destroyed || this._clipStamp !== stamp)
+                return;
+            if (text && text.trim() && text.length <= 5000)
+                this._clip = { text, t: stamp };
+            this._clipSync();
+        });
+    }
+
+    _clipLabel(text) {
+        const flat = text.replace(/\s+/g, ' ').trim();
+        return '📋 ' + (Array.from(flat).length > 18 ? Array.from(flat).slice(0, 18).join('') + '…' : flat);
+    }
+
+    _clipSync() {
+        const chip = this._clipChip;
+        if (!chip)
+            return;
+        if (this._clipTimer) {
+            GLib.source_remove(this._clipTimer);
+            this._clipTimer = 0;
+        }
+        const c = this._clip;
+        const left = c ? CLIP_TTL_US - (GLib.get_monotonic_time() - c.t) : 0;
+        if (c && left <= 0)
+            this._clip = null;
+        const show = !!this._clip && this._clipOn() && !Main.sessionMode.isLocked;
+        chip.visible = show;
+        if (!show)
+            return;
+        chip.label = this._clipLabel(c.text);
+        this._clipTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.ceil(left / 1000) + 50, () => {
+            this._clipTimer = 0;
+            this._clipSync();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _clipPaste() {
+        const c = this._clip;
+        if (!c)
+            return;
+        this._clip = null;
+        this._clipSync();
+        this._keySeq++;
+        this._playSound();
+        this._tsUnknown();
+        this._trkUnknown();
+        const im = Main.inputMethod;
+        if (im && im.currentFocus)
+            im.commit(c.text);
+        else
+            this._input.tapCombo([29], 47);   // no text-input focus (e.g. X11 app): Ctrl+V
+        this._acUpdate();
+    }
+
+    _clipDestroy() {
+        if (this._clipTimer) {
+            GLib.source_remove(this._clipTimer);
+            this._clipTimer = 0;
+        }
+        if (this._clipSel && this._clipSelId)
+            this._clipSel.disconnect(this._clipSelId);
+        this._clipSelId = 0;
+        this._clipSel = null;
+        this._clip = null;
+    }
+
+    // ------------------------------------------------------------------
+    // Emoji panel (emoji key): covers the key area until ABC is tapped
+    // ------------------------------------------------------------------
+    _emojiCell() {
+        for (const row of this._rows ?? []) {
+            for (const k of row.keys) {
+                if (k._keyH && this._isLetterDef(k._keyDef))
+                    return k._keyH;
+            }
+        }
+        return 48;
+    }
+
+    _emojiLook() {
+        if (!this._emojiPanel)
+            return;
+        const dark = !(this._isMaterial() && this._isLight());
+        this._emojiPanel.setLook(dark ? '#f3f3f3' : '#1f1f1f', this._fontFamilyCss || 'sans-serif');
+    }
+
+    _emojiShow(show) {
+        show = !!show;
+        if (show === !!this._emojiOpen || !this._keysBox)
+            return;
+        if (show) {
+            if (!this._emojiPanel) {
+                this._emojiPanel = new EmojiPanel({
+                    dataPath: GLib.build_filenamev([this._extension.path, 'emoji-data.txt']),
+                    recentPath: GLib.build_filenamev([GLib.get_user_config_dir(), 'tabula-osk', 'emoji-recent.json']),
+                    cellSize: () => this._emojiCell(),
+                    onEmoji: e => this._emojiCommit(e),
+                    onBackspace: () => {
+                        this._keySeq++;
+                        this._playSound();
+                        this._onBackspaceTap();
+                    },
+                    onClose: () => this._emojiShow(false),
+                });
+                this._keysBox.add_child(this._emojiPanel.actor);
+            } else {
+                this._emojiPanel.reset();
+            }
+            this._emojiLook();
+            this._resetGestureStates();
+        }
+        this._emojiOpen = show;
+        if (this._emojiPanel)
+            this._emojiPanel.actor.visible = show;
+        this._rowsBox.opacity = show ? 0 : 255;
+        this._overlay.opacity = show ? 0 : 255;
+    }
+
+    _emojiDrop() {
+        this._emojiOpen = false;
+        if (this._emojiPanel) {
+            this._emojiPanel.destroy();
+            this._emojiPanel = null;
+        }
+    }
+
+    _emojiCommit(emoji) {
+        this._keySeq++;
+        this._playSound();
+        this._typeText(emoji);
+        this._tsOnKey({}, emoji);
+        this._trkAppend(emoji);
+        this._acUpdate();
     }
 
     _tsSizeBar(h) {
@@ -3577,6 +3805,14 @@ export class TabulaKeyboard {
             if (ct)
                 ct.font_name = `${fam} 15px`;
         }
+        if (this._clipChip) {
+            const dark = !(this._isMaterial() && this._isLight());
+            this._clipChip.set_style(`font-family: "${fam}"; font-size: 14px; ` +
+                `color: ${dark ? '#f3f3f3' : '#1f1f1f'}; ` +
+                `background-color: ${dark ? 'rgba(255, 255, 255, 0.16)' : 'rgba(0, 0, 0, 0.10)'}; ` +
+                'border-radius: 14px; margin: 4px 6px 4px 2px; padding: 0 12px;');
+        }
+        this._emojiLook();
     }
 
     // ---- data -----------------------------------------------------------
@@ -5014,6 +5250,7 @@ export class TabulaKeyboard {
     open() {
         this._resetGestureStates();
         this.isOpen = true;
+        this._clipSync();
         this._tsOnOpen();
         this.actor.show();
         this.actor.opacity = 255;
@@ -5038,6 +5275,7 @@ export class TabulaKeyboard {
     }
 
     close() {
+        this._emojiShow(false);
         this._endHandleDrag();
         this._deadZoneDropAll();
         this._resetGestureStates();
@@ -5098,6 +5336,12 @@ export class TabulaKeyboard {
 
     destroy() {
         this._destroyed = true;
+        this._clipDestroy();
+        this._emojiDrop();
+        if (this._letterHoldId) {
+            GLib.source_remove(this._letterHoldId);
+            this._letterHoldId = 0;
+        }
         for (const id of this._oneShotIds ?? [])
             GLib.source_remove(id);
         this._oneShotIds?.clear();

@@ -550,3 +550,44 @@
 .tabula-osk-theme-material.tabula-osk-light .tabula-osk-split-half.pressed {
     background-color: #d3dbe5;
 }
+
+/* Emoji panel (covers the keys while open) */
+.tabula-osk-emoji-panel {
+    padding: 2px 4px 0 4px;
+}
+
+.tabula-osk-emoji-bar {
+    spacing: 2px;
+    padding-bottom: 2px;
+}
+
+.tabula-osk-emoji-tab,
+.tabula-osk-emoji-cell,
+.tabula-osk-emoji-ctl {
+    background-color: transparent;
+    border: none;
+    box-shadow: none;
+    border-radius: 8px;
+    padding: 0;
+}
+
+.tabula-osk-emoji-ctl {
+    padding: 0 12px;
+    font-weight: bold;
+}
+
+.tabula-osk-emoji-page {
+    padding: 0 4px;
+}
+
+.tabula-osk-emoji-tab-active,
+.tabula-osk-emoji-tab:active,
+.tabula-osk-emoji-cell:active,
+.tabula-osk-emoji-ctl:active {
+    background-color: rgba(128, 128, 128, 0.35);
+}
+
+/* Paste button in the suggestion bar */
+.tabula-osk-clip-chip:active {
+    background-color: rgba(128, 128, 128, 0.45);
+}

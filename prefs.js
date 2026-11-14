@@ -192,7 +192,7 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
         // One scrolling page; most detail is folded into expanders
         const page = new Adw.PreferencesPage();
         window.add(page);
-        this._addAppearsSections(page, settings);
+        this._addAppearsSections(page, window, settings);
         this._addLayoutSection(page, window, settings);
         this._addTypingHelpSection(page, settings);
         this._addAppearanceSection(page, settings);
@@ -247,6 +247,11 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
             _('Slide across the letters to type a word'),
             _('Start on the first letter, pass over the others and lift your finger: the word is typed with a space after it. Other guesses appear in the suggestion bar; tap one to swap it in. English words only. A short tap or a hold works as before.')));
 
+        smartGroup.add(switchRow(settings, 'clipboard-chip',
+            _('Paste button'),
+            _('Offer text you just copied at the left of the suggestion bar'),
+            _('For three minutes after you copy some text, a button with its first words appears beside the suggestions; tap it to paste. The text is only kept in memory, is never shown on the lock screen, and passwords copied from a password manager are ignored.')));
+
         const keysGroup = suggestGroup;
 
         keysGroup.add(switchRow(settings, 'play-sound',
@@ -271,7 +276,7 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
     // ==========================================
     // When it appears, size and position
     // ==========================================
-    _addAppearsSections(page, settings) {
+    _addAppearsSections(page, window, settings) {
 
         const openGroup = new Adw.PreferencesGroup({ title: _('When It Appears') });
         page.add(openGroup);
@@ -286,6 +291,21 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
         autoShowRow.add_row(switchRow(settings, 'hide-on-hardware-key',
             _('Hide on physical key'),
             _('Close when you type on the Type Cover or another keyboard')));
+        const blockedRow = new Adw.ActionRow({
+            title: _('Stay closed in these apps'),
+            activatable: true,
+        });
+        const blockedSubtitle = () => {
+            const n = settings.get_strv('auto-show-blocked-apps').length;
+            blockedRow.subtitle = n
+                ? _('%d apps: the keyboard never opens by itself there').replace('%d', n)
+                : _('Pick apps where it should never open by itself (games, players…)');
+        };
+        blockedSubtitle();
+        settings.connect('changed::auto-show-blocked-apps', blockedSubtitle);
+        blockedRow.add_suffix(new Gtk.Image({ icon_name: 'go-next-symbolic' }));
+        blockedRow.connect('activated', () => window.push_subpage(this._buildBlockedAppsPage(settings)));
+        autoShowRow.add_row(blockedRow);
         openGroup.add(autoShowRow);
 
         openGroup.add(switchRow(settings, 'show-panel-button',
@@ -621,6 +641,48 @@ export default class TabulaOskPreferences extends ExtensionPreferences {
     // ==========================================
     // Layout Studio (sub-page of the Layout section)
     // ==========================================
+    // Sub-page: one switch per installed app; switched-on apps never get the keyboard by themselves
+    _buildBlockedAppsPage(settings) {
+        const page = new Adw.PreferencesPage();
+        const toolbarView = new Adw.ToolbarView({ content: page });
+        toolbarView.add_top_bar(new Adw.HeaderBar());
+        const navPage = new Adw.NavigationPage({
+            title: _('Stay closed in these apps'),
+            child: toolbarView,
+        });
+        const group = new Adw.PreferencesGroup({
+            description: _('The keyboard never opens by itself in the apps switched on here. The top bar button still opens it.'),
+        });
+        page.add(group);
+
+        const key = 'auto-show-blocked-apps';
+        const apps = Gio.AppInfo.get_all()
+            .filter(a => a.should_show() && a.get_id())
+            .sort((a, b) => a.get_display_name().localeCompare(b.get_display_name()));
+        const known = new Set(apps.map(a => a.get_id()));
+        const addRow = (id, title, icon) => {
+            const row = new Adw.SwitchRow({ title, use_markup: false });
+            if (icon)
+                row.add_prefix(new Gtk.Image({ gicon: icon, pixel_size: 32 }));
+            row.active = settings.get_strv(key).includes(id);
+            row.connect('notify::active', () => {
+                const list = settings.get_strv(key).filter(x => x !== id);
+                if (row.active)
+                    list.push(id);
+                settings.set_strv(key, list);
+            });
+            group.add(row);
+        };
+        // Listed apps that are no longer installed stay visible so they can be switched off
+        for (const id of settings.get_strv(key)) {
+            if (!known.has(id))
+                addRow(id, id, null);
+        }
+        for (const a of apps)
+            addRow(a.get_id(), a.get_display_name(), a.get_icon());
+        return navPage;
+    }
+
     _buildLayoutStudioPage(window, settings) {
         const page3 = new Adw.PreferencesPage();
         const header = new Adw.HeaderBar();

@@ -1,0 +1,41 @@
+name: Bug report
+description: Something does not work as described
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: Steps to reproduce help a lot. A screenshot or short video too.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Tabula OSK version
+      description: Shown in the Extensions app, or `gnome-extensions info tabula-osk@besho-sho`
+    validations:
+      required: true
+  - type: input
+    id: gnome
+    attributes:
+      label: GNOME Shell version and distribution
+      placeholder: GNOME 51.1, Fedora 45
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      placeholder: Surface Go 3, touch screen with Type Cover attached
+  - type: input
+    id: layout
+    attributes:
+      label: Keyboard layout and app
+      description: Tablet, US or custom; and the app where it happens
+  - type: textarea
+    id: log
+    attributes:
+      label: Log output
+      description: "Output of `journalctl --user -b -o cat /usr/bin/gnome-shell | grep -i -B2 -A6 tabula` (check it for anything private first)"
+      render: text

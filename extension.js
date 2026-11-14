@@ -9,6 +9,7 @@ import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
+import Shell from 'gi://Shell';
 
 import { VirtualInput } from './input.js';
 import { TabulaKeyboard } from './keyboard.js';
@@ -439,7 +440,7 @@ export default class TabulaOskExtension extends Extension {
         this._reopenId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
             this._reopenId = 0;
             if (this._hwClosed && this.keyboard && !this.keyboard.isOpen &&
-                this._textFieldFocused() && !this._focusInModalDialog()) {
+                this._textFieldFocused() && !this._focusInModalDialog() && !this._appBlocked()) {
                 this.keyboard.open();
                 this._autoOpened = true;
             }
@@ -451,7 +452,23 @@ export default class TabulaOskExtension extends Extension {
     // Was the text focus reached by tapping it? A workspace switch, or a tap on the dock,
     // app grid or overview, moves the focus to a window whose text field was already
     // focused: that must not pop the keyboard up.
+    // Apps the user listed under "Stay closed in these apps": never auto-open there
+    // (the top-bar button still works). Shell text entries are not affected.
+    _appBlocked() {
+        try {
+            const list = this._settings.get_strv('auto-show-blocked-apps');
+            if (!list.length || global.stage.key_focus instanceof Clutter.Text)
+                return false;
+            const app = Shell.WindowTracker.get_default().focus_app;
+            return !!app && list.includes(app.get_id());
+        } catch (err) {
+            return false;
+        }
+    }
+
     _focusGainFromTap() {
+        if (this._appBlocked())
+            return false;
         try {
             const f = global.stage.key_focus;
             const now = GLib.get_monotonic_time();
@@ -549,7 +566,8 @@ export default class TabulaOskExtension extends Extension {
                 this._pendingTapId = 0;
                 if (!this.keyboard || this.keyboard.isOpen || Main.overview.visible)
                     return GLib.SOURCE_REMOVE;
-                if (this._focusTarget() !== win || !this._textFieldFocused() || this._focusInModalDialog())
+                if (this._focusTarget() !== win || !this._textFieldFocused() || this._focusInModalDialog() ||
+                    this._appBlocked())
                     return GLib.SOURCE_REMOVE;
                 try {
                     const inhibit = Clutter.InputContentHintFlags.INHIBIT_OSK ?? 0;
