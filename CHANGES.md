@@ -1,5 +1,9 @@
 # Changes
 
+## 1.5.1 (2026-11-15)
+- Tablet layout: the ☺ (emoji) key is now on the left of the space bar, as on Gboard, and `/` moved to its right, next
+  to `.` and `,` on the row above. Custom layouts are not changed.
+
 ## 1.5.0 (2026-11-15)
 - **Emoji panel** (Tablet layout): the new ☺ key to the right of the space bar swaps the keys for pages of emoji. Tabs along the
   top pick the category, the first tab holds the emoji you used most recently, and a sideways swipe or the ‹ › buttons

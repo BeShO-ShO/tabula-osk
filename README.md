@@ -112,7 +112,7 @@ The sensitivity of both gestures can be set in pixels per character.
 * **Swipe typing (English, optional):** turn it on in Settings → Typing Help. Slide from the first letter across the others and
   lift your finger: the word is typed with a space, and three other guesses appear in the suggestion bar (tap one to swap it in).
   Backspace right after a swipe deletes the whole word. Taps and holds for accents work as before.
-* **Emoji panel (Tablet layout):** the ☺ key to the right of the space bar swaps the keys for pages of emoji with category tabs and a
+* **Emoji panel (Tablet layout):** the ☺ key to the left of the space bar swaps the keys for pages of emoji with category tabs and a
   recently-used tab. **ABC** brings the letters back.
 * **Paste button:** for three minutes after you copy some text, its first words appear as a button at the left of the
   suggestion bar; tap it to paste. Held in memory only, never shown on the lock screen, and password-manager copies are ignored.
