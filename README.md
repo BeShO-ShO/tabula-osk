@@ -104,6 +104,7 @@ The sensitivity of both gestures can be set in pixels per character.
 ### Smart typing
 * **Word suggestions:** shown in the top row of the keyboard, between the layout button and the Cfg/Dock/Width/Close buttons: three completions, the best one in the middle.
   The keyboard learns new words as you type. Learned words stay on your computer, in `~/.config/tabula-osk/`.
+  Backspace to the end of an existing word and pause: the suggestions continue from what is left of it (also with Typing Booster).
 * **Next-word prediction:** after a space, or at the start of a sentence, the bar offers the likely next word. It learns the word pairs you type (stored only in `~/.config/tabula-osk/learned-pairs.json`), also uses the pairs Typing Booster has learned, and starts from a small built-in list.
 * **Typing Booster mode:** suggestions can come from `ibus-typing-booster` instead, which sees the real text and shows six candidates.
   While the keyboard is open the input method switches to Typing Booster, and it switches back when the keyboard closes.

@@ -2524,6 +2524,69 @@ export class TabulaKeyboard {
             this._smartPairStack.pop();
         }
         this._acUpdate();
+        this._reopenSchedule();
+    }
+
+    // Backspace stopped at the end of a word: suggestions continue from the part that is
+    // left. Typing Booster gets the part back as its preedit (its own "reopen preedit"
+    // option fails in GTK apps, which reset the input method on BackSpace); the built-in
+    // list takes it as the word being typed. Any key press in the meantime cancels this.
+    _reopenSchedule() {
+        if (this._reopenId)
+            GLib.source_remove(this._reopenId);
+        const seq = this._keySeq;
+        this._reopenId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 350, () => {
+            this._reopenId = 0;
+            this._reopenWord(seq).catch(e => console.warn('[TabulaOSK] reopen failed:', e.message));
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    async _reopenWord(seq) {
+        const stale = () => seq !== this._keySeq || this._destroyed || !this.isOpen;
+        if (stale() || !this._tsEnabled() || !this._tsFieldAllowed())
+            return;
+        const im = Main.inputMethod;
+        if (im.hasPreedit?.())
+            return;
+        const before = await this._freshSurrounding();
+        if (stale() || before === null || im.hasPreedit?.())
+            return;
+        // Only at the end of a word, not in the middle of one
+        let after = '';
+        try {
+            const [text, cursor] = im.getSurroundingText();
+            after = GLib.utf8_substring(text, cursor, -1) ?? '';
+        } catch (e) {}
+        if (/^[\p{L}\p{N}'’_]/u.test(after))
+            return;
+        if (this._tbOn()) {
+            const m = before.match(/\p{L}+(?:['’]\p{L}+)*$/u);
+            const part = m ? m[0] : '';
+            const n = Array.from(part).length;
+            if (!n || n > 30)
+                return;
+            im.delete_surrounding(-n, n);
+            for (const ch of Array.from(part)) {
+                if (stale())
+                    return;
+                const kv = Clutter.unicode_to_keysym(ch.codePointAt(0));
+                let handled = false;
+                try {
+                    // eslint-disable-next-line no-await-in-loop
+                    handled = await im.handleVirtualKey(kv);
+                } catch (e) {}
+                if (!handled)
+                    im.commit(ch);
+            }
+            return;
+        }
+        const m = before.match(/\p{L}+$/u);
+        if (!m || this._tsBuf)
+            return;
+        this._tsBuf = m[0];
+        this._tsSuppress = false;
+        this._tsRefresh();
     }
 
     _onKeyMotion(btn, keyDef, event) {
@@ -5378,6 +5441,10 @@ export class TabulaKeyboard {
         this._cleanupStageGesture();
         this._swDecoder = null;
         this._swLast = null;
+        if (this._reopenId) {
+            GLib.source_remove(this._reopenId);
+            this._reopenId = 0;
+        }
         this._stopKeyRepeat();
         this._superLpCancel();
         if (this._superFallbackId) {

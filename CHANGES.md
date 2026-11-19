@@ -1,5 +1,14 @@
 # Changes
 
+## 1.5.2 (2026-11-19)
+- **Suggestions after Backspace:** when you backspace to the end of a word that is already typed and pause briefly, the
+  suggestions continue from what is left of it (`beautiful` → backspace to `beau` → *beauty*, *beautiful* …) instead of
+  starting from nothing. With Typing Booster the remaining part becomes its underlined word again, so its candidates
+  apply; with the built-in list it counts as the word being typed. Nothing happens while you keep deleting, when you
+  type in the meantime, or when the cursor is inside a word. Needs an app that reports its text to the input method
+  (GTK apps, Firefox, Chrome); not used in terminals or password fields. Typing Booster's own *reopen preedit* option
+  does not do this in GTK apps, which reset the input method on every Backspace.
+
 ## 1.5.1 (2026-11-15)
 - Tablet layout: the ☺ (emoji) key is now on the left of the space bar, as on Gboard, and `/` moved to its right, next
   to `.` and `,` on the row above. Custom layouts are not changed.
