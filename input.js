@@ -76,29 +76,47 @@ export class VirtualInput {
         }
     }
 
+    // Steps that must reach the app in order, a few ms apart (key events pass through the
+    // input method one by one; sent all at once, a Shift release can overtake the key it
+    // was meant to modify). All queued steps share one queue.
+    queue(...steps) {
+        if (!this._device) return;
+        this._queue = (this._queue || []).concat(steps);
+        if (this._queueId) return;
+        this._queue.shift()();
+        if (!this._queue.length) return;
+        this._queueId = GLib.timeout_add(GLib.PRIORITY_HIGH, 12, () => {
+            if (this._device && this._queue.length)
+                this._queue.shift()();
+            if (this._device && this._queue.length)
+                return GLib.SOURCE_CONTINUE;
+            this._queueId = 0;
+            this._queue = [];
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    queuePress(code) {
+        this.queue(() => this.pressKey(code));
+    }
+
+    queueRelease(code) {
+        this.queue(() => this.releaseKey(code));
+    }
+
+    queueTap(code) {
+        this.queue(() => this.pressKey(code), () => this.releaseKey(code));
+    }
+
     // Modifier combo (e.g. Shift+PgUp) with small gaps between the steps, so the app
     // sees Shift held down before the key and still held when it is released.
     tapCombo(mods, code) {
         if (!this._device || code <= 0) return;
-        const steps = [
+        this.queue(
             ...mods.map(m => () => this.pressKey(m)),
             () => this.pressKey(code),
             () => this.releaseKey(code),
-            ...mods.slice().reverse().map(m => () => this.releaseKey(m)),
-        ];
-        steps.shift()();
-        const id = GLib.timeout_add(GLib.PRIORITY_HIGH, 15, () => {
-            if (!this._device || !steps.length) {
-                this._tapIds.delete(id);
-                return GLib.SOURCE_REMOVE;
-            }
-            steps.shift()();
-            if (steps.length)
-                return GLib.SOURCE_CONTINUE;
-            this._tapIds.delete(id);
-            return GLib.SOURCE_REMOVE;
-        });
-        this._tapIds.add(id);
+            ...mods.slice().reverse().map(m => () => this.releaseKey(m)));
     }
 
     // Type a character that has no key on the current layout: the compositor maps the
@@ -127,6 +145,10 @@ export class VirtualInput {
     }
 
     destroy() {
+        if (this._queueId)
+            GLib.source_remove(this._queueId);
+        this._queueId = 0;
+        this._queue = [];
         for (const id of this._tapIds)
             GLib.source_remove(id);
         this._tapIds.clear();

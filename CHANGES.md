@@ -1,5 +1,12 @@
 # Changes
 
+## 1.5.3 (2026-11-27)
+- **Swipe Backspace to delete fixed:** sliding left on Backspace selects the characters to delete again, and lifting
+  the finger deletes them. Before, Shift was let go before each Left arrow reached the app, so the highlight moved or
+  vanished and only one character went. Key combinations (Shift+PgUp, paste) now go out through the same ordered queue.
+- **Swipe Backspace in terminals:** terminals cannot select text, so there the slide only counts characters (the key
+  shows *◀ Delete (n)*) and lifting the finger sends that many Backspaces.
+
 ## 1.5.2 (2026-11-19)
 - **Suggestions after Backspace:** when you backspace to the end of a word that is already typed and pause briefly, the
   suggestions continue from what is left of it (`beautiful` → backspace to `beau` → *beauty*, *beautiful* …) instead of

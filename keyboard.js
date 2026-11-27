@@ -444,6 +444,8 @@ export class TabulaKeyboard {
         this._backspaceStartX = 0;
         this._backspaceSwiping = false;
         this._backspaceSelectCount = 0;
+        this._backspaceShift = false;
+        this._backspaceTerm = false;
 
         // Cattura gesture stage continua
         this._activeGesture = null;
@@ -2370,6 +2372,13 @@ export class TabulaKeyboard {
                 this._stopKeyRepeat();
                 btn.add_style_class_name('tabula-osk-backspace-sliding');
                 btn.label = '◀ Delete';
+                // Shift stays held for the whole swipe: Left grows the selection.
+                // Terminals cannot select text: there the swipe only counts characters.
+                this._backspaceTerm = this._bsInTerminal();
+                if (!this._backspaceTerm) {
+                    this._input.queuePress(42);
+                    this._backspaceShift = true;
+                }
                 this._updateKeyStyle(btn, true);
             }
 
@@ -2378,20 +2387,9 @@ export class TabulaKeyboard {
                 const targetCount = (totalDx < -10) ? Math.floor(Math.abs(totalDx + 10) / sensitivity) : 0;
                 if (targetCount !== this._backspaceSelectCount) {
                     const diff = targetCount - this._backspaceSelectCount;
-                    if (diff > 0) {
-                        for (let i = 0; i < diff; i++) {
-                            this._input.pressKey(42);
-                            this._input.tapKey(105);
-                            this._input.releaseKey(42);
-                        }
-                    } else if (diff < 0) {
-                        const count = Math.abs(diff);
-                        for (let i = 0; i < count; i++) {
-                            this._input.pressKey(42);
-                            this._input.tapKey(106);
-                            this._input.releaseKey(42);
-                        }
-                    }
+                    const code = diff > 0 ? 105 : 106;
+                    for (let i = 0; i < Math.abs(diff) && !this._backspaceTerm; i++)
+                        this._input.queueTap(code);
                     this._backspaceSelectCount = targetCount;
                     btn.label = (targetCount > 0) ? `◀ Delete (${targetCount})` : '◀ Delete';
                     this._updateKeyStyle(btn, true);
@@ -2500,16 +2498,49 @@ export class TabulaKeyboard {
                 btn.remove_style_class_name('tabula-osk-backspace-sliding');
                 btn.label = btn._keyDef?.label || 'Backspace';
                 this._updateKeyStyle(btn, false);
-                if (this._backspaceSelectCount > 0) {
-                    this._input.tapKey(14);
-                    this._playSound();
-                }
-                this._backspaceSelectCount = 0;
+                this._bsSelectEnd();
                 this._tsUnknown();
                 return;
             }
             this._onBackspaceTap();
             return;
+        }
+    }
+
+    // End of a Backspace swipe: let go of Shift, then delete what is selected (after
+    // the selection steps, through the same queue)
+    _bsSelectEnd() {
+        if (this._backspaceShift) {
+            this._input.queueRelease(42);
+            this._backspaceShift = false;
+        }
+        if (this._backspaceSelectCount > 0) {
+            // Selected text goes with one Backspace; in a terminal one per character
+            const n = this._backspaceTerm ? this._backspaceSelectCount : 1;
+            for (let i = 0; i < n; i++)
+                this._input.queueTap(14);
+            this._playSound();
+        }
+        this._backspaceSelectCount = 0;
+        this._backspaceTerm = false;
+    }
+
+    // Focused field is a terminal (VTE reports the TERMINAL purpose; the window class
+    // catches terminals that do not)
+    _bsInTerminal() {
+        try {
+            const im = Main.inputMethod;
+            const P = Clutter.InputContentPurpose;
+            const purpose = im?.contentPurpose ?? im?.content_purpose;
+            if (P.TERMINAL !== undefined && purpose === P.TERMINAL)
+                return true;
+            if (this._focusInShell?.())
+                return false;
+            const w = global.display.get_focus_window();
+            const cls = `${w?.get_wm_class() ?? ''} ${w?.get_gtk_application_id?.() ?? ''}`.toLowerCase();
+            return /ptyxis|kgx|console|terminal|konsole|alacritty|kitty|foot|wezterm|tilix|terminator|xterm|ghostty|blackbox/.test(cls);
+        } catch (e) {
+            return false;
         }
     }
 
@@ -2664,11 +2695,7 @@ export class TabulaKeyboard {
                 btn.remove_style_class_name('tabula-osk-backspace-sliding');
                 btn.label = keyDef.label || 'Backspace';
                 this._updateKeyStyle(btn, false);
-                if (this._backspaceSelectCount > 0) {
-                    this._input.tapKey(14);
-                    this._playSound();
-                }
-                this._backspaceSelectCount = 0;
+                this._bsSelectEnd();
                 this._tsUnknown();
                 return;
             }
@@ -2774,11 +2801,7 @@ export class TabulaKeyboard {
                 this._backspaceButton.label = this._backspaceButton._keyDef?.label || 'Backspace';
                 this._updateKeyStyle(this._backspaceButton, false);
             }
-            if (this._backspaceSelectCount > 0) {
-                this._input.tapKey(14);
-                this._playSound();
-            }
-            this._backspaceSelectCount = 0;
+            this._bsSelectEnd();
         }
 
         if (this._keyActors) {
